@@ -28,11 +28,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Lowercase Repository Name
+      - name: Set Lowercase Image Names
         id: repository
         run: |
-          echo "IMAGE_NAME_WEB=ghcr.io/${{ github.repository_owner }}/i7ai-cloud-manager-web" >> $GITHUB_ENV
-          echo "IMAGE_NAME_WORKER=ghcr.io/${{ github.repository_owner }}/i7ai-cloud-manager-worker" >> $GITHUB_ENV
+          OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME_WEB=ghcr.io/${OWNER_LOWER}/i7ai-cloud-manager-web" >> $GITHUB_ENV
+          echo "IMAGE_NAME_WORKER=ghcr.io/${OWNER_LOWER}/i7ai-cloud-manager-worker" >> $GITHUB_ENV
 
       - name: Build and Push Web Image
         uses: docker/build-push-action@v5
