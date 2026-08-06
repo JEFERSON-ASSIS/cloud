@@ -1,0 +1,81 @@
+version: "3.7"
+
+services:
+  # 1. SERVIÇO WEB + API (Exposto no Traefik para cloud.i7ai.com.br)
+  i7ai-cloud-web:
+    image: ghcr.io/jeferson-assis/i7ai-cloud-manager-web:main
+    networks:
+      - SGDMNET
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      APP_URL: "https://cloud.i7ai.com.br"
+      AUTH_URL: "https://cloud.i7ai.com.br"
+      AUTH_SECRET: ${AUTH_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: redis://i7ai-cloud-redis:6379
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: "https://cloud.i7ai.com.br/api/integrations/google-drive/callback"
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024M
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=SGDMNET
+        - traefik.http.routers.i7ai_cloud_web.rule=Host(`cloud.i7ai.com.br`)
+        - traefik.http.routers.i7ai_cloud_web.entrypoints=websecure
+        - traefik.http.routers.i7ai_cloud_web.tls=true
+        - traefik.http.routers.i7ai_cloud_web.tls.certresolver=letsencryptresolver
+        - traefik.http.services.i7ai_cloud_web.loadbalancer.server.port=3000
+        - traefik.http.services.i7ai_cloud_web.loadbalancer.passHostHeader=true
+        - traefik.http.routers.i7ai_cloud_web.service=i7ai_cloud_web
+
+  # 2. WORKER SEPARADO (Processa os backups em segundo plano)
+  i7ai-cloud-worker:
+    image: ghcr.io/jeferson-assis/i7ai-cloud-manager-worker:main
+    networks:
+      - SGDMNET
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: redis://i7ai-cloud-redis:6379
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024M
+
+  # 3. REDIS PARA A FILA BULLMQ
+  i7ai-cloud-redis:
+    image: redis:8-alpine
+    networks:
+      - SGDMNET
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+networks:
+  SGDMNET:
+    external: true
+    name: SGDMNET
