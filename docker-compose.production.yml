@@ -1,0 +1,26 @@
+services:
+  web:
+    image: ${APP_IMAGE:-i7ai/cloud-manager}:${APP_VERSION:-latest}
+    build: { context: ".", target: "web" }
+    ports: []
+    deploy:
+      replicas: 2
+      restart_policy: { condition: on-failure }
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.i7ai-cloud.rule=Host(`${APP_HOST}`)
+        - traefik.http.routers.i7ai-cloud.entrypoints=websecure
+        - traefik.http.routers.i7ai-cloud.tls.certresolver=letsencrypt
+        - traefik.http.services.i7ai-cloud.loadbalancer.server.port=3000
+    networks: ["internal", "traefik-public"]
+  worker:
+    image: ${WORKER_IMAGE:-i7ai/cloud-manager-worker}:${APP_VERSION:-latest}
+    build: { context: ".", target: "worker" }
+    deploy: { replicas: 1, restart_policy: { condition: on-failure } }
+  postgres:
+    deploy: { placement: { constraints: ["node.role == manager"] } }
+  redis:
+    deploy: { placement: { constraints: ["node.role == manager"] } }
+networks:
+  traefik-public:
+    external: true

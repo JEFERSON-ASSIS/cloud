@@ -1,0 +1,133 @@
+import { NextResponse } from "next/server";
+import { prisma } from "@i7ai/database";
+import { requireTenant } from "@/server/tenant";
+import { writeAudit } from "@/server/audit";
+import { z } from "zod";
+
+type Params = Promise<{ id: string }>;
+
+const updateScheduleSchema = z.object({
+  name: z.string().min(1).optional(),
+  time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  timezone: z.string().optional(),
+  retentionDaily: z.number().int().min(1).max(365).optional(),
+  retentionWeekly: z.number().int().min(0).max(52).optional(),
+  retentionMonthly: z.number().int().min(0).max(60).optional(),
+  active: z.boolean().optional(),
+  sourceIds: z.array(z.string().uuid()).min(1).optional(),
+});
+
+export async function GET(_req: Request, { params }: { params: Params }) {
+  try {
+    const tenant = await requireTenant("backup.read");
+    const organizationId = tenant.organizationId!;
+    const { id } = await params;
+
+    const schedule = await prisma.backupSchedule.findFirst({
+      where: { id, organizationId },
+      include: {
+        sources: {
+          include: { source: { select: { id: true, name: true, type: true } } },
+        },
+        runs: {
+          orderBy: { createdAt: "desc" },
+          take: 10,
+          select: { id: true, status: true, startedAt: true, completedAt: true, durationMs: true, errorMessage: true },
+        },
+      },
+    });
+
+    if (!schedule) {
+      return NextResponse.json({ error: "Agendamento não encontrado." }, { status: 404 });
+    }
+
+    return NextResponse.json({ ...schedule, sources: schedule.sources.map((s) => s.source) });
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes("Unauthorized"))
+      return NextResponse.json({ error: err.message }, { status: 401 });
+    return NextResponse.json({ error: "Erro ao buscar agendamento." }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: Request, { params }: { params: Params }) {
+  try {
+    const tenant = await requireTenant("backup.manage");
+    const organizationId = tenant.organizationId!;
+    const { id } = await params;
+
+    await prisma.backupSchedule.findFirstOrThrow({ where: { id, organizationId } });
+
+    const body = await request.json();
+    const result = updateScheduleSchema.safeParse(body);
+    if (!result.success) {
+      return NextResponse.json({ error: result.error.issues[0]?.message || result.error.message }, { status: 400 });
+    }
+
+    const { sourceIds, ...rest } = result.data;
+
+    const updateData = {
+      ...rest,
+      ...(sourceIds
+        ? {
+            sources: {
+              deleteMany: {},
+              create: sourceIds.map((sourceId) => ({ sourceId })),
+            },
+          }
+        : {}),
+    } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+    const schedule = await prisma.backupSchedule.update({
+      where: { id },
+      data: updateData,
+      include: {
+        sources: {
+          include: { source: { select: { id: true, name: true, type: true } } },
+        },
+      },
+    });
+
+    await writeAudit({
+      organizationId,
+      userId: tenant.userId,
+      action: "SCHEDULE_UPDATE",
+      resourceType: "BackupSchedule",
+      resourceId: id,
+    });
+
+    const includedSchedule = schedule as typeof schedule & {
+      sources: Array<{ source: { id: string; name: string; type: string } }>;
+    };
+
+    return NextResponse.json({ ...schedule, sources: includedSchedule.sources.map((s) => s.source) });
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes("Unauthorized"))
+      return NextResponse.json({ error: err.message }, { status: 401 });
+    return NextResponse.json({ error: "Erro ao atualizar agendamento." }, { status: 500 });
+  }
+}
+
+export async function DELETE(_req: Request, { params }: { params: Params }) {
+  try {
+    const tenant = await requireTenant("backup.manage");
+    const organizationId = tenant.organizationId!;
+    const { id } = await params;
+
+    await prisma.backupSchedule.findFirstOrThrow({ where: { id, organizationId } });
+    await prisma.backupSchedule.delete({ where: { id } });
+
+    await writeAudit({
+      organizationId,
+      userId: tenant.userId,
+      action: "SCHEDULE_DELETE",
+      resourceType: "BackupSchedule",
+      resourceId: id,
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes("Unauthorized"))
+      return NextResponse.json({ error: err.message }, { status: 401 });
+    return NextResponse.json({ error: "Erro ao excluir agendamento." }, { status: 500 });
+  }
+}

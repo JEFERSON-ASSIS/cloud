@@ -1,0 +1,33 @@
+import { NextResponse } from "next/server";
+import { prisma } from "@i7ai/database";
+import { requireTenant } from "@/server/tenant";
+
+type Params = Promise<{ id: string }>;
+
+export async function GET(request: Request, { params }: { params: Params }) {
+  try {
+    const tenant = await requireTenant("backup.read");
+    const organizationId = tenant.organizationId!;
+    const { id } = await params;
+
+    const run = await prisma.backupRun.findFirstOrThrow({
+      where: { id, organizationId },
+      include: {
+        source: {
+          select: { name: true, type: true },
+        },
+        logs: {
+          orderBy: { createdAt: "asc" },
+        },
+        files: {
+          select: { id: true, name: true, size: true, verifiedAt: true },
+        },
+      },
+    });
+
+    return NextResponse.json(run);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erro desconhecido";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

@@ -1,0 +1,192 @@
+import { NextResponse } from "next/server";
+import { prisma } from "@i7ai/database";
+import { requireTenant } from "@/server/tenant";
+import { encryptSecret, decryptSecret } from "@/server/encryption";
+import { writeAudit } from "@/server/audit";
+import { addBackupJob } from "@i7ai/backup-core";
+import { z } from "zod";
+
+const updateSourceSchema = z.object({
+  name: z.string().min(1, "Nome é obrigatório").optional(),
+  serverId: z.string().uuid().nullable().optional(),
+  active: z.boolean().optional(),
+  config: z.record(z.string(), z.any()).optional(),
+});
+
+type Params = Promise<{ id: string }>;
+
+export async function GET(request: Request, { params }: { params: Params }) {
+  try {
+    const tenant = await requireTenant("backup.read");
+    const organizationId = tenant.organizationId!;
+    const { id } = await params;
+
+    const source = await prisma.backupSource.findFirstOrThrow({
+      where: { id, organizationId, deletedAt: null },
+      include: {
+        server: {
+          select: { name: true },
+        },
+      },
+    });
+
+    // Descriptografar config
+    let config = {};
+    if (source.encryptedConfig && typeof source.encryptedConfig === "object") {
+      const { ciphertext } = source.encryptedConfig as { ciphertext?: string };
+      if (ciphertext) {
+        config = JSON.parse(decryptSecret(ciphertext));
+      }
+    }
+
+    return NextResponse.json({
+      id: source.id,
+      name: source.name,
+      type: source.type,
+      serverId: source.serverId,
+      serverName: source.server?.name || "Local",
+      active: source.active,
+      createdAt: source.createdAt,
+      config,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erro desconhecido";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: Request, { params }: { params: Params }) {
+  try {
+    const tenant = await requireTenant("backup.manage");
+    const organizationId = tenant.organizationId!;
+    const { id } = await params;
+
+    // Verificar se existe
+    await prisma.backupSource.findFirstOrThrow({
+      where: { id, organizationId, deletedAt: null },
+    });
+
+    const body = await request.json();
+    const result = updateSourceSchema.safeParse(body);
+    if (!result.success) {
+      return NextResponse.json({ error: result.error.issues[0]?.message || result.error.message }, { status: 400 });
+    }
+
+    const { name, serverId, active, config } = result.data;
+    const data: Record<string, unknown> = {};
+
+    if (name !== undefined) data.name = name;
+    if (active !== undefined) data.active = active;
+
+    if (serverId !== undefined) {
+      if (serverId) {
+        await prisma.server.findFirstOrThrow({
+          where: { id: serverId, organizationId, deletedAt: null },
+        });
+      }
+      data.serverId = serverId;
+    }
+
+    if (config !== undefined) {
+      const ciphertext = encryptSecret(JSON.stringify(config));
+      data.encryptedConfig = { ciphertext };
+    }
+
+    const updated = await prisma.backupSource.update({
+      where: { id },
+      data,
+    });
+
+    await writeAudit({
+      organizationId,
+      userId: tenant.userId,
+      action: "BACKUP_SOURCE_UPDATE",
+      resourceType: "BACKUP_SOURCE",
+      resourceId: id,
+      metadata: { id, name: updated.name },
+    });
+
+    return NextResponse.json({
+      id: updated.id,
+      name: updated.name,
+      type: updated.type,
+      serverId: updated.serverId,
+      active: updated.active,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erro desconhecido";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request, { params }: { params: Params }) {
+  try {
+    const tenant = await requireTenant("backup.manage");
+    const organizationId = tenant.organizationId!;
+    const { id } = await params;
+
+    const source = await prisma.backupSource.findFirstOrThrow({
+      where: { id, organizationId, deletedAt: null },
+    });
+
+    await prisma.backupSource.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+
+    await writeAudit({
+      organizationId,
+      userId: tenant.userId,
+      action: "BACKUP_SOURCE_DELETE",
+      resourceType: "BACKUP_SOURCE",
+      resourceId: id,
+      metadata: { id, name: source.name },
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erro desconhecido";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+// Disparar backup manual
+export async function POST(request: Request, { params }: { params: Params }) {
+  try {
+    const tenant = await requireTenant("backup.manage");
+    const organizationId = tenant.organizationId!;
+    const { id } = await params;
+
+    const source = await prisma.backupSource.findFirstOrThrow({
+      where: { id, organizationId, deletedAt: null },
+    });
+
+    const run = await prisma.backupRun.create({
+      data: {
+        organizationId,
+        sourceId: id,
+        status: "PENDING",
+        progress: 0,
+        startedAt: new Date(),
+        currentStep: "Enfileirado",
+      },
+    });
+
+    // Adicionar job à fila BullMQ
+    await addBackupJob(run.id, source.id);
+
+    await writeAudit({
+      organizationId,
+      userId: tenant.userId,
+      action: "BACKUP_STARTED",
+      resourceType: "BACKUP_RUN",
+      resourceId: run.id,
+      metadata: { sourceId: id, sourceName: source.name },
+    });
+
+    return NextResponse.json(run);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erro desconhecido";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

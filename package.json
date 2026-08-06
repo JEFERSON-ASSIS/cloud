@@ -1,0 +1,29 @@
+{
+  "name": "i7ai-cloud-manager",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@11.6.2",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "db:generate": "npm run db:generate -w @i7ai/database",
+    "db:migrate": "npm run db:migrate -w @i7ai/database",
+    "db:seed": "npm run db:seed -w @i7ai/database"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "turbo": "2.10.8",
+    "typescript": "5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
