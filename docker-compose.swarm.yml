@@ -15,7 +15,8 @@ services:
       AUTH_SECRET: "MjhkYTlmMzQ1Nzg5MGFiY2RlZmdoaWprbG1ub3BxcnM="
       ENCRYPTION_KEY: "ZTFhMmIzYzRkNWU2ZjdnOGg5aTBqMWsybDNtNG41bzY="
       DATABASE_URL: "postgresql://postgres:SUA_SENHA_DO_POSTGRES_AQUI@postgres:5432/i7ai_cloud?schema=public"
-      REDIS_URL: "redis://i7ai-cloud-redis:6379"
+      # Pode usar o evolution_redis existente na SGDMNET (usando banco 2):
+      REDIS_URL: "redis://evolution_redis:6379/2"
       GOOGLE_CLIENT_ID: ""
       GOOGLE_CLIENT_SECRET: ""
       GOOGLE_REDIRECT_URI: "https://cloud.i7ai.com.br/api/integrations/google-drive/callback"
@@ -48,7 +49,7 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: "postgresql://postgres:SUA_SENHA_DO_POSTGRES_AQUI@postgres:5432/i7ai_cloud?schema=public"
-      REDIS_URL: "redis://i7ai-cloud-redis:6379"
+      REDIS_URL: "redis://evolution_redis:6379/2"
       ENCRYPTION_KEY: "ZTFhMmIzYzRkNWU2ZjdnOGg5aTBqMWsybDNtNG41bzY="
       GOOGLE_CLIENT_ID: ""
       GOOGLE_CLIENT_SECRET: ""
@@ -62,18 +63,6 @@ services:
         limits:
           cpus: "1"
           memory: 1024M
-
-  # 3. REDIS PARA A FILA BULLMQ
-  i7ai-cloud-redis:
-    image: redis:8-alpine
-    networks:
-      - SGDMNET
-    deploy:
-      mode: replicated
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
 
 networks:
   SGDMNET:
