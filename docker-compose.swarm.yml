@@ -12,12 +12,12 @@ services:
       HOSTNAME: "0.0.0.0"
       APP_URL: "https://cloud.i7ai.com.br"
       AUTH_URL: "https://cloud.i7ai.com.br"
-      AUTH_SECRET: ${AUTH_SECRET}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: redis://i7ai-cloud-redis:6379
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      AUTH_SECRET: "MjhkYTlmMzQ1Nzg5MGFiY2RlZmdoaWprbG1ub3BxcnM="
+      ENCRYPTION_KEY: "ZTFhMmIzYzRkNWU2ZjdnOGg5aTBqMWsybDNtNG41bzY="
+      DATABASE_URL: "postgresql://postgres:SUA_SENHA_DO_POSTGRES_AQUI@postgres:5432/i7ai_cloud?schema=public"
+      REDIS_URL: "redis://i7ai-cloud-redis:6379"
+      GOOGLE_CLIENT_ID: ""
+      GOOGLE_CLIENT_SECRET: ""
       GOOGLE_REDIRECT_URI: "https://cloud.i7ai.com.br/api/integrations/google-drive/callback"
     deploy:
       mode: replicated
@@ -47,11 +47,11 @@ services:
       - SGDMNET
     environment:
       NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: redis://i7ai-cloud-redis:6379
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      DATABASE_URL: "postgresql://postgres:SUA_SENHA_DO_POSTGRES_AQUI@postgres:5432/i7ai_cloud?schema=public"
+      REDIS_URL: "redis://i7ai-cloud-redis:6379"
+      ENCRYPTION_KEY: "ZTFhMmIzYzRkNWU2ZjdnOGg5aTBqMWsybDNtNG41bzY="
+      GOOGLE_CLIENT_ID: ""
+      GOOGLE_CLIENT_SECRET: ""
     deploy:
       mode: replicated
       replicas: 1
