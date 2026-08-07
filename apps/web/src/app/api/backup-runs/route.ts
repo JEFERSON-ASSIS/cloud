@@ -1,17 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
+import { requireTenantOrganization } from "@/server/tenant";
 import { getUserSectorIds } from "@/server/sector-access";
 
 export async function GET(request: Request) {
   try {
-    const tenant = await requireTenant("backup.read");
-    const url = new URL(request.url);
-    const paramOrgId = url.searchParams.get("organizationId");
-    const organizationId =
-      tenant.role === "SUPER_ADMIN" && paramOrgId
-        ? paramOrgId
-        : tenant.organizationId!;
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "backup.read",
+      request,
+    );
     const allowedSectorIds = await getUserSectorIds(tenant.userId, organizationId, tenant.role);
 
     const whereClause: any = { organizationId };

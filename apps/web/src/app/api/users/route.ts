@@ -2,6 +2,7 @@ import argon2 from "argon2";
 import { prisma } from "@i7ai/database";
 import { z } from "zod";
 import { requireTenant } from "@/server/tenant";
+import { canAssignOrganizationRole, resolveManagedOrganizationId } from "@/server/user-memberships";
 
 const createUserSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -9,6 +10,7 @@ const createUserSchema = z.object({
   password: z.string().min(12).max(200),
   role: z.enum(["SUPER_ADMIN", "ADMIN", "MANAGER", "OPERATOR", "VIEWER"]),
   organizationId: z.string().uuid().optional(),
+  sectorIds: z.array(z.string().uuid()).default([]),
 });
 
 export async function GET(request: Request) {
@@ -17,7 +19,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const paramOrgId = url.searchParams.get("organizationId");
 
-    const whereClause: any = {};
+    const whereClause: { organizationId?: string } = {};
     if (tenant.role === "SUPER_ADMIN") {
       if (paramOrgId) {
         whereClause.organizationId = paramOrgId;
@@ -26,6 +28,7 @@ export async function GET(request: Request) {
       whereClause.organizationId = tenant.organizationId!;
     }
 
+    const sectorOrganizationId = paramOrgId ?? (tenant.role === "SUPER_ADMIN" ? null : tenant.organizationId);
     const orgUsers = await prisma.organizationUser.findMany({
       where: whereClause,
       include: {
@@ -34,6 +37,7 @@ export async function GET(request: Request) {
         user: {
           include: {
             sectors: {
+              ...(sectorOrganizationId ? { where: { sector: { organizationId: sectorOrganizationId } } } : {}),
               include: {
                 sector: { select: { id: true, name: true } },
               },
@@ -72,31 +76,65 @@ export async function POST(request: Request) {
     const tenant = await requireTenant("user.manage");
     const data = createUserSchema.parse(await request.json());
 
-    const targetOrgId =
-      tenant.role === "SUPER_ADMIN" && data.organizationId
-        ? data.organizationId
-        : tenant.organizationId!;
+    const targetOrgId = resolveManagedOrganizationId({
+      actorRole: tenant.role,
+      sessionOrganizationId: tenant.organizationId,
+      requestedOrganizationId: data.organizationId,
+    });
+
+    if (!targetOrgId) {
+      return Response.json({ error: "Selecione uma empresa ou prefeitura." }, { status: 400 });
+    }
+    if (!canAssignOrganizationRole(tenant.role, data.role)) {
+      return Response.json({ error: "Apenas um Super Administrador pode conceder esse perfil." }, { status: 403 });
+    }
+
+    const organization = await prisma.organization.findFirst({
+      where: { id: targetOrgId, deletedAt: null, status: "ACTIVE" },
+      select: { id: true },
+    });
+    if (!organization) {
+      return Response.json({ error: "Empresa ou prefeitura inválida." }, { status: 400 });
+    }
+    const sectors = await prisma.sector.findMany({
+      where: { id: { in: data.sectorIds }, organizationId: targetOrgId, deletedAt: null },
+      select: { id: true },
+    });
+    if (sectors.length !== data.sectorIds.length) {
+      return Response.json({ error: "Uma ou mais secretarias não pertencem à empresa selecionada." }, { status: 400 });
+    }
 
     const role = await prisma.role.findUniqueOrThrow({
       where: { name: data.role },
     });
 
     const user = await prisma.$transaction(async (tx) => {
-      const created = await tx.user.create({
+      const existing = await tx.user.findUnique({ where: { email: data.email } });
+      const created = existing ?? await tx.user.create({
         data: {
           name: data.name,
           email: data.email,
-          passwordHash: await argon2.hash(data.password, {
-            type: argon2.argon2id,
-          }),
+          passwordHash: await argon2.hash(data.password, { type: argon2.argon2id }),
         },
       });
 
-      await tx.organizationUser.create({
-        data: {
+      await tx.organizationUser.upsert({
+        where: { organizationId_userId: { organizationId: targetOrgId, userId: created.id } },
+        update: { roleId: role.id },
+        create: {
           organizationId: targetOrgId,
           userId: created.id,
           roleId: role.id,
+        },
+      });
+
+      for (const sector of sectors) await tx.sectorUser.upsert({
+        where: { sectorId_userId: { sectorId: sector.id, userId: created.id } },
+        update: {},
+        create: {
+          sectorId: sector.id,
+          userId: created.id,
+          role: "VIEWER_DOWNLOAD",
         },
       });
 

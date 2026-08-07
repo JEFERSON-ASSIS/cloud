@@ -2,6 +2,7 @@
 
 import {
   PropsWithChildren,
+  useCallback,
   useEffect,
   useState,
 } from "react";
@@ -53,6 +54,7 @@ import {
 } from "@mui/icons-material";
 import type { ReactNode } from "react";
 import type { Permission } from "@i7ai/types";
+import { ActiveTenantContext } from "./ActiveTenantContext";
 
 const expandedWidth = 264;
 const collapsedWidth = 76;
@@ -104,20 +106,22 @@ export function AppShell({ children }: PropsWithChildren) {
   const [activeSectorId, setActiveSectorId] = useState<string>("");
 
   const [organizations, setOrganizations] = useState<OrganizationOption[]>([]);
-  const [activeOrgId, setActiveOrgId] = useState<string>("");
+  const [activeOrgId, setActiveOrgId] = useState<string>(() =>
+    typeof window !== "undefined" ? localStorage.getItem("active-org-id") ?? "" : ""
+  );
 
   const userRole = data?.user?.role;
   const userPermissions = data?.user?.permissions ?? [];
 
   // Filtragem dinâmica de menus por permissão e perfil
   const filteredNavItems = navItems.filter((item) => {
-    if ((userRole as any) === "SUPER_ADMIN") return true;
-    if (item.superAdminOnly && (userRole as any) !== "SUPER_ADMIN") return false;
+    if (userRole === "SUPER_ADMIN") return true;
+    if (item.superAdminOnly) return false;
     if (!item.permission) return true;
     return userPermissions.includes(item.permission);
   });
 
-  const fetchOrganizations = () => {
+  const fetchOrganizations = useCallback(() => {
     fetch("/api/organizations")
       .then((res) => res.json())
       .then((list) => {
@@ -125,15 +129,15 @@ export function AppShell({ children }: PropsWithChildren) {
           setOrganizations(
             list.map((item) => ({ id: item.id, name: item.name }))
           );
-          if (!activeOrgId) {
-            const current =
-              list.find((o) => o.id === data?.user?.organizationId) || list[0];
-            setActiveOrgId(current.id);
-          }
+          const current = list.find((o) => o.id === activeOrgId)
+            ?? list.find((o) => o.id === data?.user?.organizationId)
+            ?? list[0];
+          if (current.id !== activeOrgId) setActiveOrgId(current.id);
+          localStorage.setItem("active-org-id", current.id);
         }
       })
       .catch(() => {});
-  };
+  }, [activeOrgId, data?.user?.organizationId]);
 
   useEffect(() => {
     fetchOrganizations();
@@ -142,7 +146,7 @@ export function AppShell({ children }: PropsWithChildren) {
     return () => {
       window.removeEventListener("organization-updated", handleOrgUpdate);
     };
-  }, [data?.user?.organizationId]);
+  }, [fetchOrganizations]);
 
   useEffect(() => {
     const orgId = activeOrgId || data?.user?.organizationId;
@@ -159,7 +163,9 @@ export function AppShell({ children }: PropsWithChildren) {
               localStorage.setItem("active-sector-id", found.id);
             } else {
               setActiveSectorId("");
+              localStorage.removeItem("active-sector-id");
             }
+            window.dispatchEvent(new Event("active-sector-changed"));
           }
         })
         .catch(() => {});
@@ -169,6 +175,8 @@ export function AppShell({ children }: PropsWithChildren) {
   const handleOrgChange = (id: string) => {
     setActiveOrgId(id);
     localStorage.setItem("active-org-id", id);
+    setActiveSectorId("");
+    localStorage.removeItem("active-sector-id");
     window.dispatchEvent(new Event("active-org-changed"));
   };
 
@@ -325,6 +333,16 @@ export function AppShell({ children }: PropsWithChildren) {
   );
 
   return (
+    <ActiveTenantContext.Provider
+      value={{
+        organizations,
+        sectors: sectors.map((sector) => ({ ...sector, organizationId: activeOrgId })),
+        activeOrganizationId: activeOrgId || data?.user?.organizationId || "",
+        activeSectorId,
+        setActiveOrganizationId: handleOrgChange,
+        setActiveSectorId: handleSectorChange,
+      }}
+    >
     <Box sx={{ display: "flex", minHeight: "100vh" }}>
       <CssBaseline />
       {mobile ? (
@@ -450,5 +468,6 @@ export function AppShell({ children }: PropsWithChildren) {
         </Box>
       </Box>
     </Box>
+    </ActiveTenantContext.Provider>
   );
 }

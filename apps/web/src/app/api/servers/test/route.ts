@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
+import { requireTenantOrganization } from "@/server/tenant";
 import { decryptSecret } from "@/server/encryption";
 import { testSshConnection } from "@i7ai/backup-core";
+import { assertSafeOutboundHost } from "@i7ai/security";
 import { z } from "zod";
 
 const testSchema = z.object({
@@ -17,10 +18,13 @@ const testSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const tenant = await requireTenant("backup.manage");
-    const organizationId = tenant.organizationId!;
-
     const body = await request.json();
+    const { organizationId } = await requireTenantOrganization(
+      "backup.manage",
+      request,
+      typeof body?.organizationId === "string" ? body.organizationId : null,
+    );
+
     const result = testSchema.safeParse(body);
     if (!result.success) {
       return NextResponse.json({ error: result.error.issues[0]?.message || result.error.message }, { status: 400 });
@@ -53,6 +57,7 @@ export async function POST(request: Request) {
     }
 
     try {
+      await assertSafeOutboundHost(host, "ssh");
       await testSshConnection({ host, port, username, password, privateKey });
       return NextResponse.json({ success: true });
     } catch (sshError) {

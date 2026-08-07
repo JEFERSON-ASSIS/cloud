@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
-import { encryptSecret, decryptSecret } from "@i7ai/security";
+import { requireTenantOrganization } from "@/server/tenant";
 import { S3StorageProvider } from "@i7ai/storage";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const tenant = await requireTenant("integration.manage");
+    const { organizationId } = await requireTenantOrganization(
+      "integration.manage",
+      request,
+    );
     const connection = await prisma.storageConnection.findFirst({
       where: {
-        organizationId: tenant.organizationId!,
+        organizationId,
         provider: "S3",
         deletedAt: null,
       },
@@ -33,8 +35,12 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const tenant = await requireTenant("integration.manage");
     const body = await req.json();
+    const { organizationId } = await requireTenantOrganization(
+      "integration.manage",
+      req,
+      typeof body?.organizationId === "string" ? body.organizationId : null,
+    );
     const { name, endpoint, region, bucket, accessKeyId, secretAccessKey, provider = "S3" } = body;
 
     if (!bucket || !accessKeyId || !secretAccessKey) {
@@ -61,7 +67,7 @@ export async function POST(req: Request) {
         id: body.id || "00000000-0000-0000-0000-000000000000",
       },
       create: {
-        organizationId: tenant.organizationId!,
+        organizationId,
         provider: provider === "MINIO" ? "MINIO" : provider === "BACKBLAZE_B2" ? "BACKBLAZE_B2" : "S3",
         name: name || `Armazenamento ${provider}`,
         status: "CONNECTED",
@@ -84,12 +90,15 @@ export async function POST(req: Request) {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
   try {
-    const tenant = await requireTenant("integration.manage");
+    const { organizationId } = await requireTenantOrganization(
+      "integration.manage",
+      request,
+    );
     await prisma.storageConnection.updateMany({
       where: {
-        organizationId: tenant.organizationId!,
+        organizationId,
         provider: { in: ["S3", "MINIO", "BACKBLAZE_B2"] },
       },
       data: {

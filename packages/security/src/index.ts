@@ -120,6 +120,14 @@ export function decryptSecret(value: string): string {
   ]).toString("utf8");
 }
 
+export {
+  assertSafeOutboundHost,
+  assertSafeWebhookUrl,
+  fetchSafeWebhook,
+  isBlockedIpAddress,
+} from "./safe-outbound";
+export type { OutboundPolicy } from "./safe-outbound";
+
 import { createReadStream, createWriteStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
 

@@ -14,9 +14,14 @@ export async function POST(request: Request) {
       parentId?: string | null;
       sectorId?: string | null;
       storageSpaceId?: string | null;
+      organizationId?: string;
     };
     const name = cleanName(body.name ?? "");
-    const parent = await assertFolder(tenant.organizationId!, body.parentId);
+    const organizationId = tenant.role === "SUPER_ADMIN" && body.organizationId
+      ? body.organizationId
+      : tenant.organizationId;
+    if (!organizationId) throw new Error("Selecione uma empresa ou prefeitura.");
+    const parent = await assertFolder(organizationId, body.parentId);
 
     let sectorId = body.sectorId || null;
     let storageSpaceId = body.storageSpaceId || null;
@@ -24,6 +29,17 @@ export async function POST(request: Request) {
     if (parent) {
       sectorId = parent.sectorId;
       storageSpaceId = parent.storageSpaceId;
+    }
+
+    if (sectorId) {
+      const sector = await prisma.sector.findFirst({ where: { id: sectorId, organizationId, deletedAt: null } });
+      if (!sector) throw new Error("A secretaria não pertence à empresa selecionada.");
+    }
+    if (storageSpaceId) {
+      const storageSpace = await prisma.storageSpace.findFirst({
+        where: { id: storageSpaceId, organizationId, ...(sectorId ? { sectorId } : {}), deletedAt: null },
+      });
+      if (!storageSpace) throw new Error("O espaço de armazenamento não pertence à empresa e secretaria selecionadas.");
     }
 
     // Validar permissões da secretaria se fornecida
@@ -41,7 +57,7 @@ export async function POST(request: Request) {
     }
 
     const organization = await prisma.organization.findUniqueOrThrow({
-      where: { id: tenant.organizationId! },
+      where: { id: organizationId },
     });
     const { drive, rootFolderId } = await ensureDriveRoot(
       organization.id,
@@ -83,4 +99,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

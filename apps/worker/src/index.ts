@@ -1,12 +1,13 @@
 import { prisma } from "@i7ai/database";
 import { decryptSecret, encryptSecret, encryptFile, decryptFile } from "@i7ai/security";
 import { GoogleDriveStorageProvider } from "@i7ai/storage";
-import { testSshConnection, addBackupJob, sendBackupNotification, applyRetentionPolicy } from "@i7ai/backup-core";
+import { testSshConnection, executeSshCommandWithInput, addBackupJob, sendBackupNotification, applyRetentionPolicy } from "@i7ai/backup-core";
 import { Worker, Job } from "bullmq";
 import { Client } from "ssh2";
 import { createHash } from "node:crypto";
 import { createWriteStream, unlinkSync, existsSync, mkdirSync, createReadStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
+import { Readable } from "node:stream";
 import { exec, execFile } from "node:child_process";
 import { createGzip } from "node:zlib";
 import { promisify } from "node:util";
@@ -15,6 +16,14 @@ import * as cron from "node-cron";
 
 const execAsync = promisify(exec);
 const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+
+type BackupJobData = {
+  runId: string;
+  sourceId: string;
+  isRestore?: boolean;
+  remoteFileId?: string;
+  targetServerId?: string;
+};
 
 console.info(JSON.stringify({ level: "info", service: "worker", message: "Worker de Backup iniciado e aguardando tarefas." }));
 
@@ -27,7 +36,7 @@ if (!existsSync(tmpDir)) {
 // Inicializar Worker BullMQ para escutar a fila "backup"
 const backupWorker = new Worker(
   "backup",
-  async (job: Job<{ runId: string; sourceId: string }>) => {
+  async (job: Job<BackupJobData>) => {
     const { runId, sourceId } = job.data;
     console.info(`[Job ${job.id}] Iniciando processamento de backup para runId=${runId}, sourceId=${sourceId}`);
 
@@ -74,8 +83,9 @@ const backupWorker = new Worker(
     try {
 
       // VERIFICAR SE É UMA OPERAÇÃO DE RESTAURAÇÃO (RESTORE)
-      if ((job.data as any).isRestore) {
-        const { remoteFileId } = job.data as any;
+      if (job.data.isRestore) {
+        const { remoteFileId, targetServerId } = job.data;
+        if (!remoteFileId) throw new Error("Arquivo remoto não informado para restauração.");
         await updateProgress(10, "Baixando Arquivo de Backup", "PREPARING");
         await log("INFO", `Iniciando RESTAURAÇÃO para a origem "${source.name}". Baixando arquivo remoto (File ID: ${remoteFileId})...`);
 
@@ -97,14 +107,7 @@ const backupWorker = new Worker(
         
         // Baixar stream para arquivo local
         const downloadStream = await drive.download(remoteFileId);
-        const writeStream = createWriteStream(localTempFilePath);
-        const reader = downloadStream.getReader();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          writeStream.write(value);
-        }
-        writeStream.end();
+        await pipeline(Readable.fromWeb(downloadStream as never), createWriteStream(localTempFilePath));
 
         let restoreFilePath = localTempFilePath;
         const meta = await drive.getMetadata(remoteFileId);
@@ -117,44 +120,57 @@ const backupWorker = new Worker(
         await updateProgress(50, "Executando Comando de Restauração", "RUNNING");
         await log("INFO", "Download e descriptografia concluídos. Executando processo de restauração...");
 
-        let restoreCmd = "";
+        const shellQuote = (value: unknown) => `'${String(value).replaceAll("'", `'\\''`)}'`;
+        const dockerName = String(config.dockerName || "");
+        if (dockerName && !/^[a-zA-Z0-9_.-]+$/.test(dockerName)) throw new Error("Nome de container Docker inválido.");
+        let localRestoreCmd = "";
+        let remoteRestoreCmd = "";
         if (source.type === "MYSQL") {
           const dbUser = config.dbUser || "root";
           const dbPassword = config.dbPassword || "";
           const dbName = config.dbName || "";
-          const dockerName = config.dockerName || "";
-          const passArg = dbPassword ? `-p"${dbPassword}"` : "";
-
+          const env = dbPassword ? `MYSQL_PWD=${shellQuote(dbPassword)} ` : "";
           if (dockerName) {
-            restoreCmd = `docker exec -i ${dockerName} mysql -u${dbUser} ${passArg} ${dbName} < "${restoreFilePath}"`;
+            remoteRestoreCmd = `gzip -dc | docker exec -i -e MYSQL_PWD=${shellQuote(dbPassword)} ${shellQuote(dockerName)} mysql -u ${shellQuote(dbUser)} ${shellQuote(dbName)}`;
           } else {
-            restoreCmd = `mysql -u${dbUser} ${passArg} ${dbName} < "${restoreFilePath}"`;
+            remoteRestoreCmd = `gzip -dc | ${env}mysql -u ${shellQuote(dbUser)} ${shellQuote(dbName)}`;
           }
+          localRestoreCmd = remoteRestoreCmd.replace("gzip -dc", `gzip -dc ${shellQuote(restoreFilePath)}`);
         } else if (source.type === "POSTGRESQL") {
           const dbUser = config.dbUser || "postgres";
           const dbPassword = config.dbPassword || "";
           const dbName = config.dbName || "";
-          const dockerName = config.dockerName || "";
-          const passEnv = dbPassword ? `PGPASSWORD="${dbPassword}" ` : "";
-
+          const passEnv = dbPassword ? `PGPASSWORD=${shellQuote(dbPassword)} ` : "";
           if (dockerName) {
-            restoreCmd = `${passEnv}docker exec -i -e PGPASSWORD="${dbPassword}" ${dockerName} psql -U${dbUser} -d${dbName} < "${restoreFilePath}"`;
+            remoteRestoreCmd = `gzip -dc | docker exec -i -e PGPASSWORD=${shellQuote(dbPassword)} ${shellQuote(dockerName)} psql -U ${shellQuote(dbUser)} -d ${shellQuote(dbName)}`;
           } else {
-            restoreCmd = `${passEnv}psql -U${dbUser} -d${dbName} < "${restoreFilePath}"`;
+            remoteRestoreCmd = `gzip -dc | ${passEnv}psql -U ${shellQuote(dbUser)} -d ${shellQuote(dbName)}`;
           }
+          localRestoreCmd = remoteRestoreCmd.replace("gzip -dc", `gzip -dc ${shellQuote(restoreFilePath)}`);
         } else if (source.type === "DIRECTORY") {
           const targetPath = config.path || "./";
-          restoreCmd = `tar -xzf "${restoreFilePath}" -C "${targetPath}"`;
+          remoteRestoreCmd = `tar -xzf - -C ${shellQuote(targetPath)}`;
+          localRestoreCmd = `tar -xzf ${shellQuote(restoreFilePath)} -C ${shellQuote(targetPath)}`;
+        } else {
+          throw new Error(`Restauração não suportada para o tipo ${source.type}.`);
         }
 
-        if (restoreCmd) {
-          if (source.server) {
-            await log("INFO", `Executando restauração via SSH em: ${source.server.host}`);
-            // Executar via SSH se houver servidor associado
+        const targetServer = targetServerId
+          ? await prisma.server.findFirst({ where: { id: targetServerId, organizationId, deletedAt: null } })
+          : source.server;
+        if (targetServerId && !targetServer) throw new Error("Servidor de destino não encontrado ou removido.");
+        if (targetServer) {
+            await log("INFO", `Executando restauração via SSH em: ${targetServer.host}`);
+            await executeSshCommandWithInput({
+              host: targetServer.host,
+              port: targetServer.port,
+              username: targetServer.username,
+              password: targetServer.encryptedPassword ? decryptSecret(targetServer.encryptedPassword) : null,
+              privateKey: targetServer.encryptedPrivateKey ? decryptSecret(targetServer.encryptedPrivateKey) : null,
+            }, remoteRestoreCmd, restoreFilePath);
           } else {
             await log("INFO", "Executando restauração localmente...");
-            await execAsync(restoreCmd);
-          }
+            await execAsync(localRestoreCmd);
         }
 
         await updateProgress(100, "Restauração Concluída", "COMPLETED");
@@ -694,8 +710,23 @@ function freqToCronExpression(frequency: string, time: string): string {
   return `${minute} ${hour} * * *`;
 }
 
-// Mapa de jobs de cron ativos (scheduleId -> tarefa)
-const activeCronJobs = new Map<string, cron.ScheduledTask>();
+type ActiveCronEntry = {
+  task: cron.ScheduledTask;
+  fingerprint: string;
+};
+
+// Mapa de jobs de cron ativos (scheduleId -> tarefa + fingerprint)
+const activeCronJobs = new Map<string, ActiveCronEntry>();
+
+function scheduleFingerprint(schedule: {
+  frequency: string;
+  time: string;
+  timezone: string | null;
+  sources: { sourceId: string }[];
+}): string {
+  const sourceIds = schedule.sources.map((item) => item.sourceId).sort().join(",");
+  return `${schedule.frequency}|${schedule.time}|${schedule.timezone || "America/Cuiaba"}|${sourceIds}`;
+}
 
 async function syncScheduler() {
   console.info("[Scheduler] Sincronizando agendamentos ativos...");
@@ -709,19 +740,19 @@ async function syncScheduler() {
       },
     });
 
-    // Remover jobs que foram desativados
-    for (const [id, task] of activeCronJobs.entries()) {
+    // Remover jobs que foram desativados ou cuja configuração mudou
+    for (const [id, entry] of activeCronJobs.entries()) {
       const still = schedules.find((s: { id: string }) => s.id === id);
-      if (!still) {
-        task.stop();
+      if (!still || entry.fingerprint !== scheduleFingerprint(still)) {
+        entry.task.stop();
         activeCronJobs.delete(id);
-        console.info(`[Scheduler] Agendamento ${id} removido.`);
+        console.info(`[Scheduler] Agendamento ${id} removido${still ? " para recriação" : ""}.`);
       }
     }
 
     // Adicionar/atualizar jobs
     for (const schedule of schedules) {
-      if (activeCronJobs.has(schedule.id)) continue; // já existe
+      if (activeCronJobs.has(schedule.id)) continue;
 
       const expression = freqToCronExpression(schedule.frequency, schedule.time);
       if (!cron.validate(expression)) {
@@ -729,6 +760,7 @@ async function syncScheduler() {
         continue;
       }
 
+      const fingerprint = scheduleFingerprint(schedule);
       const task = cron.schedule(expression, async () => {
         console.info(`[Scheduler] Disparando backup agendado: ${schedule.name}`);
         for (const scheduleSource of schedule.sources) {
@@ -751,6 +783,7 @@ async function syncScheduler() {
             continue;
           }
 
+          let runId: string | null = null;
           try {
             const run = await prisma.backupRun.create({
               data: {
@@ -762,10 +795,21 @@ async function syncScheduler() {
                 startedAt: new Date(),
               },
             });
+            runId = run.id;
 
             await addBackupJob(run.id, source.id);
             console.info(`[Scheduler] Job de backup enfileirado com sucesso: run=${run.id} source=${source.id} sector=${resolvedSectorId}`);
           } catch (err) {
+            if (runId) {
+              await prisma.backupRun.update({
+                where: { id: runId },
+                data: {
+                  status: "FAILED",
+                  errorMessage: "Falha ao enfileirar job no Redis.",
+                  completedAt: new Date(),
+                },
+              }).catch(() => undefined);
+            }
             console.error(`[Scheduler] Erro ao enfileirar backup para source ${source.id}:`, err);
           }
         }
@@ -773,7 +817,7 @@ async function syncScheduler() {
         timezone: schedule.timezone || "America/Cuiaba",
       });
 
-      activeCronJobs.set(schedule.id, task);
+      activeCronJobs.set(schedule.id, { task, fingerprint });
       console.info(`[Scheduler] Agendamento ativo: ${schedule.name} (${expression}) timezone=${schedule.timezone}`);
     }
   } catch (err) {

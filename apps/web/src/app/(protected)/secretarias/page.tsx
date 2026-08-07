@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Avatar,
@@ -38,9 +38,11 @@ import {
   AdminPanelSettings,
 } from "@mui/icons-material";
 import { PageHeader } from "@/components/PageHeader/PageHeader";
+import { useActiveTenant } from "@/components/AppShell/ActiveTenantContext";
 
 type Sector = {
   id: string;
+  organizationId: string;
   name: string;
   quotaLimit: string;
   documentCount?: number;
@@ -131,9 +133,9 @@ type OrgOption = {
 };
 
 export default function SecretariasPage() {
+  const { activeOrganizationId: selectedOrgId, setActiveOrganizationId } = useActiveTenant();
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [organizations, setOrganizations] = useState<OrgOption[]>([]);
-  const [selectedOrgId, setSelectedOrgId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -156,7 +158,7 @@ export default function SecretariasPage() {
   const [savingMember, setSavingMember] = useState(false);
   const [memberModalError, setMemberModalError] = useState("");
 
-  const loadSectors = async (showProgress = true, overrideOrgId?: string) => {
+  const loadSectors = useCallback(async (showProgress = true, overrideOrgId?: string) => {
     if (showProgress) setLoading(true);
     try {
       const activeOrgId = overrideOrgId !== undefined ? overrideOrgId : selectedOrgId;
@@ -175,20 +177,20 @@ export default function SecretariasPage() {
 
       if (resOrgs.ok && Array.isArray(dataOrgs)) {
         setOrganizations(dataOrgs);
-        if (dataOrgs.length > 0 && !activeOrgId) {
-          setSelectedOrgId(dataOrgs[0].id);
-        }
       }
     } catch {
       setError("Erro de rede.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedOrgId]);
 
   useEffect(() => {
-    void loadSectors(true);
-  }, []);
+    const timer = window.setTimeout(() => {
+      if (selectedOrgId) void loadSectors(true, selectedOrgId);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [selectedOrgId, loadSectors]);
 
   const handleSaveSector = async () => {
     setError("");
@@ -249,7 +251,7 @@ export default function SecretariasPage() {
     try {
       const [resMembers, resUsers] = await Promise.all([
         fetch(`/api/sectors/${sector.id}/users`),
-        fetch(`/api/users`),
+        fetch(`/api/users?organizationId=${sector.organizationId}`),
       ]);
       const dataMembers = await resMembers.json();
       const dataUsers = await resUsers.json();
@@ -656,8 +658,7 @@ export default function SecretariasPage() {
                 disabled={!!editingSector}
                 onChange={(e) => {
                   const newOrgId = e.target.value;
-                  setSelectedOrgId(newOrgId);
-                  void loadSectors(false, newOrgId);
+                  setActiveOrganizationId(newOrgId);
                 }}
               >
                 {organizations.map((org) => (

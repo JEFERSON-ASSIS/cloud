@@ -1,20 +1,25 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
+import { requireTenantOrganization } from "@/server/tenant";
 import { assertSectorAccess } from "@/server/sector-access";
 import { writeAudit } from "@/server/audit";
 import { addBackupJob } from "@i7ai/backup-core";
+import { z } from "zod";
+
+const restoreSchema = z.object({
+  backupRunId: z.string().uuid(),
+  targetServerId: z.string().uuid().optional(),
+});
 
 export async function POST(req: Request) {
   try {
-    const tenant = await requireTenant("backup.manage");
-    const organizationId = tenant.organizationId!;
     const body = await req.json();
-    const { backupRunId, targetServerId } = body;
-
-    if (!backupRunId) {
-      return NextResponse.json({ error: "ID do backup (backupRunId) é obrigatório." }, { status: 400 });
-    }
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "backup.manage",
+      req,
+      typeof body?.organizationId === "string" ? body.organizationId : null,
+    );
+    const { backupRunId, targetServerId } = restoreSchema.parse(body);
 
     const originalRun = await prisma.backupRun.findFirst({
       where: {
@@ -32,6 +37,11 @@ export async function POST(req: Request) {
     }
 
     await assertSectorAccess(tenant.userId, organizationId, originalRun.sectorId, tenant.role, "ADMIN");
+
+    if (targetServerId) {
+      const targetServer = await prisma.server.findFirst({ where: { id: targetServerId, organizationId, deletedAt: null } });
+      if (!targetServer) return NextResponse.json({ error: "Servidor de destino inválido para esta empresa." }, { status: 400 });
+    }
 
     const backupFile = originalRun.files[0];
     if (!backupFile) {
@@ -66,13 +76,26 @@ export async function POST(req: Request) {
       metadata: { originalRunId: originalRun.id, sectorId: originalRun.sectorId },
     });
 
-    await addBackupJob(restoreRun.id, originalRun.sourceId, {
-      isRestore: true,
-      originalRunId: originalRun.id,
-      remoteFileId: backupFile.remoteFileId,
-      storageConnectionId: backupFile.storageConnectionId,
-      targetServerId: targetServerId || originalRun.source.serverId || undefined,
-    });
+    try {
+      await addBackupJob(restoreRun.id, originalRun.sourceId, {
+        isRestore: true,
+        originalRunId: originalRun.id,
+        remoteFileId: backupFile.remoteFileId,
+        storageConnectionId: backupFile.storageConnectionId,
+        targetServerId: targetServerId || originalRun.source.serverId || undefined,
+      });
+    } catch (error) {
+      await prisma.backupRun.update({
+        where: { id: restoreRun.id },
+        data: {
+          status: "FAILED",
+          errorMessage: "Falha ao enfileirar restauração no Redis.",
+          completedAt: new Date(),
+          currentStep: "Falha ao enfileirar",
+        },
+      });
+      throw error;
+    }
 
     return NextResponse.json({
       success: true,

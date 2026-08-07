@@ -1,11 +1,14 @@
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
+import { requireTenantOrganization } from "@/server/tenant";
 import { folderBreadcrumbs } from "@/server/documents";
 import { assertSectorPermission } from "@i7ai/security";
 
 export async function GET(request: Request) {
   try {
-    const tenant = await requireTenant("document.read");
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "document.read",
+      request,
+    );
     const url = new URL(request.url);
     const folderId = url.searchParams.get("folderId");
     const search = url.searchParams.get("search")?.trim();
@@ -13,14 +16,10 @@ export async function GET(request: Request) {
     const allFolders = url.searchParams.get("allFolders") === "1";
     const sectorId = url.searchParams.get("sectorId");
     const storageSpaceId = url.searchParams.get("storageSpaceId");
-    const paramOrgId = url.searchParams.get("organizationId");
-    const organizationId =
-      tenant.role === "SUPER_ADMIN" && paramOrgId
-        ? paramOrgId
-        : tenant.organizationId!;
 
     const isPrivileged = tenant.role === "SUPER_ADMIN" || tenant.role === "ADMIN";
     let isReadOnly = false;
+    let canDownload = true;
 
     let userSectorIds: string[] = [];
     if (!isPrivileged) {
@@ -43,8 +42,10 @@ export async function GET(request: Request) {
       
       assertSectorPermission(membership?.role, "VIEWER_ONLY", isPrivileged);
       
-      if (membership?.role === "VIEWER_ONLY" && !isPrivileged) {
-        isReadOnly = true;
+      if (!isPrivileged) {
+        const role = membership?.role;
+        isReadOnly = role !== "EDITOR" && role !== "ADMIN";
+        canDownload = role === "VIEWER_DOWNLOAD" || role === "EDITOR" || role === "ADMIN";
       }
     }
 
@@ -120,6 +121,7 @@ export async function GET(request: Request) {
     return Response.json({
       breadcrumbs,
       isReadOnly,
+      canDownload,
       folders: folders.map((f) => ({ ...f, kind: "folder" })),
       documents: documents.map((d) => ({
         ...d,

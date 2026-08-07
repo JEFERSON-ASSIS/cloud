@@ -1,4 +1,5 @@
 "use client";
+import { tenantFetch } from "@/lib/tenant-fetch";
 
 import { useEffect, useState } from "react";
 import { CloudDone, Storage, Settings } from "@mui/icons-material";
@@ -68,8 +69,8 @@ export default function IntegrationsPage() {
     setLoading(true);
     try {
       const [resDrive, resS3] = await Promise.all([
-        fetch("/api/integrations/google-drive"),
-        fetch("/api/integrations/s3"),
+        tenantFetch("/api/integrations/google-drive"),
+        tenantFetch("/api/integrations/s3"),
       ]);
       setConnection(resDrive.ok ? await resDrive.json() : null);
       setS3Conn(resS3.ok ? await resS3.json() : null);
@@ -86,7 +87,7 @@ export default function IntegrationsPage() {
 
   const test = async () => {
     setLoading(true);
-    const response = await fetch("/api/integrations/google-drive", {
+    const response = await tenantFetch("/api/integrations/google-drive", {
       method: "POST",
     });
     const body = await response.json();
@@ -101,14 +102,14 @@ export default function IntegrationsPage() {
       )
     )
       return;
-    await fetch("/api/integrations/google-drive", { method: "DELETE" });
+    await tenantFetch("/api/integrations/google-drive", { method: "DELETE" });
     setMessage("Google Drive desconectado.");
     await load();
   };
 
   const configureRoot = async () => {
     setLoading(true);
-    const response = await fetch("/api/integrations/google-drive?folders=1");
+    const response = await tenantFetch("/api/integrations/google-drive?folders=1");
     const body = await response.json();
     if (response.ok) {
       setFolders(body);
@@ -118,7 +119,7 @@ export default function IntegrationsPage() {
   };
 
   const saveRoot = async () => {
-    const response = await fetch("/api/integrations/google-drive", {
+    const response = await tenantFetch("/api/integrations/google-drive", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rootFolderId }),
@@ -138,7 +139,7 @@ export default function IntegrationsPage() {
   const saveS3 = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/integrations/s3", {
+      const res = await tenantFetch("/api/integrations/s3", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -167,7 +168,7 @@ export default function IntegrationsPage() {
 
   const disconnectS3 = async () => {
     if (!confirm("Deseja remover esta conexão de armazenamento?")) return;
-    await fetch("/api/integrations/s3", { method: "DELETE" });
+    await tenantFetch("/api/integrations/s3", { method: "DELETE" });
     setMessage("Conexão S3 removida.");
     await load();
   };

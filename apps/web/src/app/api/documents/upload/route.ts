@@ -9,22 +9,28 @@ import { assertSectorPermission } from "@i7ai/security";
 
 export async function POST(request: Request) {
   let remoteFileId: string | undefined;
+  let uploadedDrive: Awaited<ReturnType<typeof ensureDriveRoot>>["drive"] | undefined;
   try {
     const tenant = await requireTenant("document.manage");
     const data = await request.formData();
     const file = data.get("file");
     const folderId = data.get("folderId")?.toString() || null;
+    const requestedOrganizationId = data.get("organizationId")?.toString() || null;
+    const organizationId = tenant.role === "SUPER_ADMIN" && requestedOrganizationId
+      ? requestedOrganizationId
+      : tenant.organizationId;
+    if (!organizationId) throw new Error("Selecione uma empresa ou prefeitura.");
     let sectorId = data.get("sectorId")?.toString() || null;
     let storageSpaceId = data.get("storageSpaceId")?.toString() || null;
 
     if (!(file instanceof File)) throw new Error("Selecione um arquivo.");
 
     const org = await prisma.organization.findUnique({
-      where: { id: tenant.organizationId! },
-      select: { storageLimit: true },
+      where: { id: organizationId },
+      select: { storageLimit: true, maxUploadFileSize: true },
     });
 
-    const maxBytes = org?.storageLimit ? Number(org.storageLimit) : Number(process.env.MAX_UPLOAD_SIZE ?? 104_857_600);
+    const maxBytes = org?.maxUploadFileSize ? Number(org.maxUploadFileSize) : Number(process.env.MAX_UPLOAD_SIZE ?? 104_857_600);
     const maxMb = Math.round(maxBytes / 1024 / 1024);
 
     if (file.size <= 0 || file.size > maxBytes)
@@ -32,8 +38,16 @@ export async function POST(request: Request) {
         `O arquivo excede o limite máximo permitido de ${maxMb} MB.`,
       );
 
+    const organizationUsage = await prisma.document.aggregate({
+      where: { organizationId, deletedAt: null, status: "AVAILABLE" },
+      _sum: { size: true },
+    });
+    if ((organizationUsage._sum.size ?? BigInt(0)) + BigInt(file.size) > (org?.storageLimit ?? BigInt(0))) {
+      throw new Error("Quota total de armazenamento da empresa excedida.");
+    }
+
     const name = cleanName(file.name);
-    const parent = await assertFolder(tenant.organizationId!, folderId);
+    const parent = await assertFolder(organizationId, folderId);
 
     if (parent) {
       sectorId = parent.sectorId;
@@ -54,10 +68,11 @@ export async function POST(request: Request) {
       assertSectorPermission(membership?.role, "EDITOR", isOrgAdminOrSuper);
 
       // Validar quota da secretaria
-      const sector = await prisma.sector.findUnique({
-        where: { id: sectorId },
+      const sector = await prisma.sector.findFirst({
+        where: { id: sectorId, organizationId, deletedAt: null },
       });
-      if (sector) {
+      if (!sector) throw new Error("A secretaria não pertence à empresa selecionada.");
+      {
         const docUsage = await prisma.document.aggregate({
           where: {
             sectorId,
@@ -74,17 +89,17 @@ export async function POST(request: Request) {
     }
 
     const organization = await prisma.organization.findUniqueOrThrow({
-      where: { id: tenant.organizationId! },
+      where: { id: organizationId },
     });
     const bytes = Buffer.from(await file.arrayBuffer());
     const checksum = createHash("sha256").update(bytes).digest("hex");
 
-    let driveConnection: any;
-    let driveProvider: any;
+    let driveConnection: Awaited<ReturnType<typeof ensureDriveRoot>>["connection"];
+    let driveProvider: Awaited<ReturnType<typeof ensureDriveRoot>>["drive"];
     let targetDriveFolderId: string;
 
     if (sectorId) {
-      const sectorObj = await prisma.sector.findUnique({ where: { id: sectorId } });
+      const sectorObj = await prisma.sector.findFirst({ where: { id: sectorId, organizationId } });
       const sectorDrive = await ensureSectorDriveFolder(
         organization.id,
         organization.name,
@@ -111,11 +126,19 @@ export async function POST(request: Request) {
       file.type || "application/octet-stream",
     );
     remoteFileId = stored.id;
+    uploadedDrive = driveProvider;
     const extension = name.includes(".")
       ? name.split(".").pop()?.toLowerCase()
       : null;
-    const document = await prisma.document.create({
-      data: {
+    const document = await prisma.$transaction(async (tx) => {
+      const usage = await tx.document.aggregate({
+        where: { organizationId, deletedAt: null, status: "AVAILABLE" },
+        _sum: { size: true },
+      });
+      if ((usage._sum.size ?? BigInt(0)) + BigInt(file.size) > organization.storageLimit) {
+        throw new Error("Quota total de armazenamento da empresa excedida.");
+      }
+      return tx.document.create({ data: {
         organizationId: organization.id,
         folderId: parent?.id ?? null,
         sectorId,
@@ -130,8 +153,8 @@ export async function POST(request: Request) {
         size: BigInt(file.size),
         checksumSha256: checksum,
         status: "AVAILABLE",
-      },
-    });
+      } });
+    }, { isolationLevel: "Serializable" });
     await writeAudit({
       organizationId: organization.id,
       userId: tenant.userId,
@@ -147,9 +170,7 @@ export async function POST(request: Request) {
   } catch (error) {
     if (remoteFileId) {
       try {
-        const tenant = await requireTenant("document.manage");
-        const { drive } = await ensureDriveRoot(tenant.organizationId!, "");
-        await drive.delete(remoteFileId);
+        await uploadedDrive?.delete(remoteFileId);
       } catch {}
     }
     return Response.json(
@@ -158,4 +179,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

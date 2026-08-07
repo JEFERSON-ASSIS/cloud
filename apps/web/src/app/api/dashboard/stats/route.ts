@@ -1,17 +1,13 @@
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
+import { requireTenantOrganization } from "@/server/tenant";
 import { subDays } from "date-fns";
 
 export async function GET(request: Request) {
   try {
-    const tenant = await requireTenant("dashboard.read");
-    const url = new URL(request.url);
-    const paramOrgId = url.searchParams.get("organizationId");
-
-    const organizationId =
-      tenant.role === "SUPER_ADMIN" && paramOrgId
-        ? paramOrgId
-        : tenant.organizationId!;
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "dashboard.read",
+      request,
+    );
 
     const since = subDays(new Date(), 29);
     const isPrivileged = tenant.role === "SUPER_ADMIN" || tenant.role === "ADMIN";

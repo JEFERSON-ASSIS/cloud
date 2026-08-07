@@ -1,15 +1,17 @@
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
+import { requireTenantOrganization } from "@/server/tenant";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const tenant = await requireTenant("organization.read");
+    const { organizationId } = await requireTenantOrganization(
+      "organization.read",
+      request,
+    );
     const org = await prisma.organization.findUniqueOrThrow({
-      where: { id: tenant.organizationId! },
-      select: { storageLimit: true },
+      where: { id: organizationId },
+      select: { maxUploadFileSize: true },
     });
-    // Converter storageLimit (BigInt em bytes) para MB
-    const mb = Math.round(Number(org.storageLimit) / 1024 / 1024);
+    const mb = Math.round(Number(org.maxUploadFileSize) / 1024 / 1024);
     return Response.json({ maxUploadSizeMB: mb || 100 });
   } catch (error) {
     return Response.json(
@@ -21,8 +23,12 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
-    const tenant = await requireTenant("organization.manage");
     const body = await request.json();
+    const { organizationId } = await requireTenantOrganization(
+      "organization.manage",
+      request,
+      typeof body?.organizationId === "string" ? body.organizationId : null,
+    );
     const maxUploadSizeMB = Number(body.maxUploadSizeMB);
 
     if (!maxUploadSizeMB || maxUploadSizeMB <= 0 || maxUploadSizeMB > 5000) {
@@ -35,8 +41,8 @@ export async function PATCH(request: Request) {
     const bytes = BigInt(maxUploadSizeMB) * BigInt(1024 * 1024);
 
     await prisma.organization.update({
-      where: { id: tenant.organizationId! },
-      data: { storageLimit: bytes },
+      where: { id: organizationId },
+      data: { maxUploadFileSize: bytes },
     });
 
     return Response.json({ success: true, maxUploadSizeMB });

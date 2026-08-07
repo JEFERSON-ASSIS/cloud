@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
-import { encryptSecret, decryptSecret } from "@i7ai/security";
+import { requireTenantOrganization } from "@/server/tenant";
+import { encryptSecret, decryptSecret, assertSafeWebhookUrl } from "@i7ai/security";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const tenant = await requireTenant("organization.read");
+    const { organizationId } = await requireTenantOrganization(
+      "organization.read",
+      request,
+    );
     const settings = await prisma.notificationSetting.findMany({
-      where: { organizationId: tenant.organizationId! },
+      where: { organizationId },
       orderBy: { createdAt: "desc" },
     });
 
@@ -44,12 +47,29 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const tenant = await requireTenant("organization.manage");
     const body = await req.json();
+    const { organizationId } = await requireTenantOrganization(
+      "organization.manage",
+      req,
+      typeof body?.organizationId === "string" ? body.organizationId : null,
+    );
     const { channel, config, events, active } = body;
 
     if (!channel) {
       return NextResponse.json({ error: "Canal é obrigatório (DISCORD, SLACK, WEBHOOK ou EMAIL)." }, { status: 400 });
+    }
+
+    const channelName = String(channel).toUpperCase();
+    const configRecord = (config || {}) as Record<string, unknown>;
+    if (channelName === "WEBHOOK" || channelName === "DISCORD" || channelName === "SLACK") {
+      const url = configRecord.url || configRecord.webhookUrl;
+      if (typeof url !== "string" || !url.trim()) {
+        return NextResponse.json({ error: "URL do webhook é obrigatória." }, { status: 400 });
+      }
+      await assertSafeWebhookUrl(url);
+    }
+    if (channelName === "EMAIL" && typeof configRecord.emailWebhookUrl === "string" && configRecord.emailWebhookUrl) {
+      await assertSafeWebhookUrl(configRecord.emailWebhookUrl);
     }
 
     const encryptedConfig = {
@@ -59,12 +79,12 @@ export async function POST(req: Request) {
     const setting = await prisma.notificationSetting.upsert({
       where: {
         organizationId_channel: {
-          organizationId: tenant.organizationId!,
+          organizationId,
           channel,
         },
       },
       create: {
-        organizationId: tenant.organizationId!,
+        organizationId,
         channel,
         events: events || ["ALL"],
         active: active ?? true,
@@ -86,7 +106,10 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const tenant = await requireTenant("organization.manage");
+    const { organizationId } = await requireTenantOrganization(
+      "organization.manage",
+      req,
+    );
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
 
@@ -97,7 +120,7 @@ export async function DELETE(req: Request) {
     await prisma.notificationSetting.delete({
       where: {
         id,
-        organizationId: tenant.organizationId!,
+        organizationId,
       },
     });
 

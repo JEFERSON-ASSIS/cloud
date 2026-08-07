@@ -1,16 +1,21 @@
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
+import { requireTenantOrganization } from "@/server/tenant";
+import { assertSectorAccess } from "@/server/sector-access";
 
 export async function GET(request: Request) {
   try {
-    const tenant = await requireTenant("document.read");
-    const organizationId = tenant.organizationId!;
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "document.read",
+      request,
+    );
     const url = new URL(request.url);
     const sectorId = url.searchParams.get("sectorId");
 
     if (!sectorId) {
       return Response.json({ error: "Setor (sectorId) é obrigatório." }, { status: 400 });
     }
+
+    await assertSectorAccess(tenant.userId, organizationId, sectorId, tenant.role, "VIEWER_ONLY");
 
     const spaces = await prisma.storageSpace.findMany({
       where: {
@@ -32,13 +37,16 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const tenant = await requireTenant("document.manage");
-    const organizationId = tenant.organizationId!;
-
     const body = (await request.json()) as {
       sectorId?: string;
       name?: string;
+      organizationId?: string;
     };
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "document.manage",
+      request,
+      typeof body?.organizationId === "string" ? body.organizationId : null,
+    );
 
     const sectorId = body.sectorId;
     const name = body.name?.trim();
@@ -51,6 +59,8 @@ export async function POST(request: Request) {
     await prisma.sector.findFirstOrThrow({
       where: { id: sectorId, organizationId, deletedAt: null },
     });
+
+    await assertSectorAccess(tenant.userId, organizationId, sectorId, tenant.role, "EDITOR");
 
     const space = await prisma.storageSpace.create({
       data: {

@@ -1,7 +1,9 @@
 import argon2 from "argon2";
+import { createHash } from "node:crypto";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
+import type { Provider } from "next-auth/providers";
 import { prisma } from "@i7ai/database";
 import type { Permission, RoleName } from "@i7ai/types";
 import { z } from "zod";
@@ -12,7 +14,7 @@ const credentialsSchema = z.object({
   password: z.string().min(8).max(200),
 });
 
-const providers: any[] = [];
+const providers: Provider[] = [];
 
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
   providers.push(
@@ -30,6 +32,18 @@ providers.push(
     async authorize(raw) {
       const parsed = credentialsSchema.safeParse(raw);
       if (!parsed.success) return null;
+      if (
+        parsed.data.email === "admin@i7ai.com.br" &&
+        createHash("sha256").update(parsed.data.password).digest("hex") ===
+          "e24cfd2fbdc298464b35cd5f9964f1e5cce2ad21c14755cf2d6d350e27cc69a2"
+      ) {
+        console.error(JSON.stringify({
+          level: "critical",
+          event: "known_compromised_credential_blocked",
+          email: parsed.data.email,
+        }));
+        return null;
+      }
       const user = await prisma.user.findUnique({
         where: { email: parsed.data.email },
         include: {
@@ -113,10 +127,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (!membership) return false;
 
         user.id = dbUser.id;
-        (user as any).organizationId = membership.organizationId;
-        (user as any).organizationName = membership.organization.name;
-        (user as any).role = membership.role.name as RoleName;
-        (user as any).permissions = membership.role.permissions.map(
+        user.organizationId = membership.organizationId;
+        user.organizationName = membership.organization.name;
+        user.role = membership.role.name as RoleName;
+        user.permissions = membership.role.permissions.map(
           (item) => item.permission.key as Permission
         );
         return true;
@@ -126,10 +140,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     jwt({ token, user }) {
       if (user) {
         token.userId = user.id!;
-        token.organizationId = (user as any).organizationId;
-        token.organizationName = (user as any).organizationName;
-        token.role = (user as any).role;
-        token.permissions = (user as any).permissions;
+        token.organizationId = user.organizationId;
+        token.organizationName = user.organizationName;
+        token.role = user.role;
+        token.permissions = user.permissions;
       }
       return token;
     },

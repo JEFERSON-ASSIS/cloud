@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
+import { requireTenantOrganization } from "@/server/tenant";
 import { encryptSecret, decryptSecret } from "@/server/encryption";
 import { writeAudit } from "@/server/audit";
 import { assertSectorAccess } from "@/server/sector-access";
 import { addBackupJob } from "@i7ai/backup-core";
 import { z } from "zod";
+import { hasBackupSecrets, mergeBackupConfig, sanitizeBackupConfig } from "@/server/backup-config";
 
 const updateSourceSchema = z.object({
   name: z.string().min(1, "Nome é obrigatório").optional(),
@@ -50,8 +51,10 @@ type Params = Promise<{ id: string }>;
 
 export async function GET(request: Request, { params }: { params: Params }) {
   try {
-    const tenant = await requireTenant("backup.read");
-    const organizationId = tenant.organizationId!;
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "backup.read",
+      request,
+    );
     const { id } = await params;
 
     const source = await prisma.backupSource.findFirstOrThrow({
@@ -73,6 +76,7 @@ export async function GET(request: Request, { params }: { params: Params }) {
       }
     }
 
+    const configRecord = config as Record<string, unknown>;
     return NextResponse.json({
       id: source.id,
       name: source.name,
@@ -82,7 +86,8 @@ export async function GET(request: Request, { params }: { params: Params }) {
       serverName: source.server?.name || "Local",
       active: source.active,
       createdAt: source.createdAt,
-      config,
+      config: sanitizeBackupConfig(configRecord),
+      hasSecretConfig: hasBackupSecrets(configRecord),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido";
@@ -92,8 +97,12 @@ export async function GET(request: Request, { params }: { params: Params }) {
 
 export async function PATCH(request: Request, { params }: { params: Params }) {
   try {
-    const tenant = await requireTenant("backup.manage");
-    const organizationId = tenant.organizationId!;
+    const body = await request.json();
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "backup.manage",
+      request,
+      typeof body?.organizationId === "string" ? body.organizationId : null,
+    );
     const { id } = await params;
 
     const source = await prisma.backupSource.findFirstOrThrow({
@@ -102,7 +111,6 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
 
     await assertSectorAccess(tenant.userId, organizationId, source.sectorId, tenant.role, "EDITOR");
 
-    const body = await request.json();
     const result = updateSourceSchema.safeParse(body);
     if (!result.success) {
       return NextResponse.json({ error: result.error.issues[0]?.message || result.error.message }, { status: 400 });
@@ -124,7 +132,12 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
     }
 
     if (config !== undefined) {
-      const ciphertext = encryptSecret(JSON.stringify(config));
+      let currentConfig: Record<string, unknown> = {};
+      if (source.encryptedConfig && typeof source.encryptedConfig === "object") {
+        const { ciphertext: currentCiphertext } = source.encryptedConfig as { ciphertext?: string };
+        if (currentCiphertext) currentConfig = JSON.parse(decryptSecret(currentCiphertext)) as Record<string, unknown>;
+      }
+      const ciphertext = encryptSecret(JSON.stringify(mergeBackupConfig(currentConfig, config)));
       data.encryptedConfig = { ciphertext };
     }
 
@@ -158,8 +171,10 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
 
 export async function DELETE(request: Request, { params }: { params: Params }) {
   try {
-    const tenant = await requireTenant("backup.manage");
-    const organizationId = tenant.organizationId!;
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "backup.manage",
+      request,
+    );
     const { id } = await params;
 
     const source = await prisma.backupSource.findFirstOrThrow({
@@ -192,8 +207,10 @@ export async function DELETE(request: Request, { params }: { params: Params }) {
 // Disparar backup manual
 export async function POST(request: Request, { params }: { params: Params }) {
   try {
-    const tenant = await requireTenant("backup.manage");
-    const organizationId = tenant.organizationId!;
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "backup.manage",
+      request,
+    );
     const { id } = await params;
 
     const source = await prisma.backupSource.findFirstOrThrow({
@@ -214,7 +231,20 @@ export async function POST(request: Request, { params }: { params: Params }) {
       },
     });
 
-    await addBackupJob(run.id, source.id);
+    try {
+      await addBackupJob(run.id, source.id);
+    } catch (error) {
+      await prisma.backupRun.update({
+        where: { id: run.id },
+        data: {
+          status: "FAILED",
+          errorMessage: "Falha ao enfileirar job no Redis.",
+          completedAt: new Date(),
+          currentStep: "Falha ao enfileirar",
+        },
+      });
+      throw error;
+    }
 
     await writeAudit({
       organizationId,

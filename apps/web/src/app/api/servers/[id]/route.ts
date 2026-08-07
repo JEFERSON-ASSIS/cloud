@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
+import { requireTenantOrganization } from "@/server/tenant";
 import { encryptSecret } from "@/server/encryption";
 import { writeAudit } from "@/server/audit";
+import { assertSafeOutboundHost } from "@i7ai/security";
 import { z } from "zod";
 
 const updateServerSchema = z.object({
@@ -19,8 +20,12 @@ type Params = Promise<{ id: string }>;
 
 export async function PATCH(request: Request, { params }: { params: Params }) {
   try {
-    const tenant = await requireTenant("backup.manage");
-    const organizationId = tenant.organizationId!;
+    const body = await request.json();
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "backup.manage",
+      request,
+      typeof body?.organizationId === "string" ? body.organizationId : null,
+    );
     const { id } = await params;
 
     // Verificar se o servidor existe e pertence à organização
@@ -28,10 +33,13 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
       where: { id, organizationId, deletedAt: null },
     });
 
-    const body = await request.json();
     const result = updateServerSchema.safeParse(body);
     if (!result.success) {
       return NextResponse.json({ error: result.error.issues[0]?.message || result.error.message }, { status: 400 });
+    }
+
+    if (result.data.host !== undefined) {
+      await assertSafeOutboundHost(result.data.host, "ssh");
     }
 
     const data: Record<string, unknown> = {};
@@ -84,8 +92,10 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
 
 export async function DELETE(request: Request, { params }: { params: Params }) {
   try {
-    const tenant = await requireTenant("backup.manage");
-    const organizationId = tenant.organizationId!;
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "backup.manage",
+      request,
+    );
     const { id } = await params;
 
     // Verificar pertencimento

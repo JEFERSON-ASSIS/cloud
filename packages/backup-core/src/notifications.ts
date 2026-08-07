@@ -1,5 +1,5 @@
 import { prisma } from "@i7ai/database";
-import { decryptSecret } from "@i7ai/security";
+import { decryptSecret, fetchSafeWebhook } from "@i7ai/security";
 
 export interface NotificationPayload {
   organizationId: string;
@@ -100,7 +100,7 @@ export async function sendBackupNotification(payload: NotificationPayload): Prom
           };
         }
 
-        const res = await fetch(url, {
+        const res = await fetchSafeWebhook(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -121,7 +121,7 @@ export async function sendBackupNotification(payload: NotificationPayload): Prom
         // Se houver webhook de envio de e-mail ou serviço configurado
         const emailWebhook = config.emailWebhookUrl;
         if (emailWebhook) {
-          await fetch(emailWebhook, {
+          await fetchSafeWebhook(emailWebhook, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ to: targetEmail, subject: title, event, sourceName, errorMessage }),

@@ -1,6 +1,12 @@
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
 import type { SectorRole } from "@i7ai/types";
+import { z } from "zod";
+
+const memberSchema = z.object({
+  email: z.string().email().transform((value) => value.trim().toLowerCase()),
+  role: z.enum(["ADMIN", "EDITOR", "VIEWER_DOWNLOAD", "VIEWER_ONLY", "NO_ACCESS"]).default("VIEWER_DOWNLOAD"),
+});
 
 export async function GET(
   request: Request,
@@ -56,17 +62,7 @@ export async function POST(
     });
     const organizationId = sector.organizationId;
 
-    const body = (await request.json()) as {
-      email?: string;
-      role?: SectorRole;
-    };
-
-    const email = body.email?.trim().toLowerCase();
-    const role = body.role ?? "VIEWER_DOWNLOAD";
-
-    if (!email) {
-      return Response.json({ error: "E-mail do usuário é obrigatório." }, { status: 400 });
-    }
+    const { email, role } = memberSchema.parse(await request.json()) as { email: string; role: SectorRole };
 
     // Buscar o usuário correspondente
     const user = await prisma.user.findUnique({
@@ -88,11 +84,13 @@ export async function POST(
     });
 
     if (!orgMembership && tenant.role === "SUPER_ADMIN") {
+      const viewerRole = await prisma.role.findUnique({ where: { name: "VIEWER" } });
+      if (!viewerRole) return Response.json({ error: "O perfil Visualizador não está configurado." }, { status: 500 });
       orgMembership = await prisma.organizationUser.create({
         data: {
           organizationId,
           userId: user.id,
-          roleId: (await prisma.role.findUnique({ where: { name: "VIEWER" } }))?.id || (await prisma.role.findFirstOrThrow()).id,
+          roleId: viewerRole.id,
         },
       });
     }

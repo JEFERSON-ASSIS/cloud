@@ -24,8 +24,6 @@ import {
   Breadcrumbs,
   Button,
   Card,
-  CardActionArea,
-  CardContent,
   Dialog,
   DialogActions,
   DialogContent,
@@ -42,6 +40,7 @@ import {
   Typography,
 } from "@mui/material";
 import { DocumentPreview } from "@/components/DocumentPreview/DocumentPreview";
+import { useActiveTenant } from "@/components/AppShell/ActiveTenantContext";
 import { useSearchParams } from "next/navigation";
 
 type Item = {
@@ -58,6 +57,7 @@ type Listing = {
   documents: Item[];
 };
 export default function FilesPage() {
+  const { activeOrganizationId, activeSectorId } = useActiveTenant();
   const query = useSearchParams();
   const [folderId, setFolderId] = useState<string | null>(
       query.get("folderId"),
@@ -83,6 +83,7 @@ export default function FilesPage() {
     [moveTarget, setMoveTarget] = useState(""),
     [allFolders, setAllFolders] = useState<Item[]>([]);
   const [isReadOnly, setIsReadOnly] = useState(false);
+  const [canDownload, setCanDownload] = useState(true);
   const input = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -91,9 +92,8 @@ export default function FilesPage() {
     if (folderId) p.set("folderId", folderId);
     if (search) p.set("search", search);
     if (trash) p.set("trash", "1");
-    const activeOrgId = localStorage.getItem("active-org-id");
+    const activeOrgId = activeOrganizationId;
     if (activeOrgId) p.set("organizationId", activeOrgId);
-    const activeSectorId = localStorage.getItem("active-sector-id");
     if (activeSectorId) p.set("sectorId", activeSectorId);
 
     try {
@@ -102,6 +102,7 @@ export default function FilesPage() {
       if (r.ok) {
         setData(b);
         setIsReadOnly(b.isReadOnly ?? false);
+        setCanDownload(b.canDownload ?? !(b.isReadOnly ?? false));
       } else {
         setError(b.error);
       }
@@ -110,13 +111,16 @@ export default function FilesPage() {
     } finally {
       setBusy(false);
     }
-  }, [folderId, search, trash]);
+  }, [folderId, search, trash, activeOrganizationId, activeSectorId]);
 
   useEffect(() => {
-    void load();
+    const timer = window.setTimeout(() => void load(), 0);
     const handleOrgChange = () => void load();
     window.addEventListener("active-org-changed", handleOrgChange);
-    return () => window.removeEventListener("active-org-changed", handleOrgChange);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("active-org-changed", handleOrgChange);
+    };
   }, [load]);
 
   useEffect(() => {
@@ -129,7 +133,6 @@ export default function FilesPage() {
   }, [load]);
 
   const uploadFiles = async (files: FileList | File[]) => {
-    const activeSectorId = localStorage.getItem("active-sector-id");
     for (const file of Array.from(files)) {
       setBusy(true);
       setProgress(0);
@@ -137,6 +140,7 @@ export default function FilesPage() {
       body.set("file", file);
       if (folderId) body.set("folderId", folderId);
       if (activeSectorId) body.set("sectorId", activeSectorId);
+      if (activeOrganizationId) body.set("organizationId", activeOrganizationId);
       try {
         await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
@@ -169,11 +173,10 @@ export default function FilesPage() {
   };
 
   const createFolder = async () => {
-    const activeSectorId = localStorage.getItem("active-sector-id");
     const r = await fetch("/api/folders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: folderName, parentId: folderId, sectorId: activeSectorId }),
+      body: JSON.stringify({ name: folderName, parentId: folderId, sectorId: activeSectorId, organizationId: activeOrganizationId }),
     });
     const b = await r.json();
     if (!r.ok) setError(b.error);
@@ -195,7 +198,10 @@ export default function FilesPage() {
       return;
     }
     if (kind === "move") {
-      const response = await fetch("/api/files?allFolders=1");
+      const params = new URLSearchParams({ allFolders: "1" });
+      if (activeOrganizationId) params.set("organizationId", activeOrganizationId);
+      if (activeSectorId) params.set("sectorId", activeSectorId);
+      const response = await fetch(`/api/files?${params}`);
       const listing = (await response.json()) as Listing;
       setAllFolders(listing.folders.filter((folder) => folder.id !== item.id));
       setMoveTarget("");
@@ -495,7 +501,7 @@ export default function FilesPage() {
           </Button>
         </DialogActions>
       </Dialog>
-      <DocumentPreview document={preview} onClose={() => setPreview(null)} hideDownload={isReadOnly} />
+      <DocumentPreview document={preview} onClose={() => setPreview(null)} hideDownload={!canDownload} />
     </Stack>
   );
 }

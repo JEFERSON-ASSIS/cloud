@@ -1,34 +1,52 @@
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
-import { assertFolder, cleanName, isDescendant } from "@/server/documents";
+import { requireTenantOrganization } from "@/server/tenant";
+import {
+  assertFolder,
+  cleanName,
+  isDescendant,
+  syncFolderTreeSector,
+} from "@/server/documents";
 import { ensureDriveRoot } from "@/server/google-drive";
 import { writeAudit } from "@/server/audit";
+import { assertSectorAccess } from "@/server/sector-access";
 
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   try {
-    const tenant = await requireTenant("document.manage");
+    const body = (await request.json()) as {
+      action?: "rename" | "move" | "trash" | "restore";
+      name?: string;
+      parentId?: string | null;
+      organizationId?: string;
+    };
+    const { tenant, organizationId: requestedOrgId } =
+      await requireTenantOrganization("document.manage", request, body.organizationId);
     const { id } = await context.params;
     const folder = await prisma.folder.findFirst({
-      where: tenant.role === "SUPER_ADMIN"
-        ? { id }
-        : { id, organizationId: tenant.organizationId! },
+      where:
+        tenant.role === "SUPER_ADMIN"
+          ? { id }
+          : { id, organizationId: requestedOrgId },
     });
     if (!folder)
       return Response.json({ error: "Pasta não encontrada." }, { status: 404 });
 
     const organizationId = folder.organizationId;
-    const body = (await request.json()) as {
-      action?: "rename" | "move" | "trash" | "restore";
-      name?: string;
-      parentId?: string | null;
-    };
-    const { drive } = await ensureDriveRoot(
+    if (tenant.role === "SUPER_ADMIN" && organizationId !== requestedOrgId) {
+      // SUPER_ADMIN pode operar pelo id; alinha o contexto à empresa do recurso.
+    }
+
+    await assertSectorAccess(
+      tenant.userId,
       organizationId,
-      "Documentos",
+      folder.sectorId,
+      tenant.role,
+      "EDITOR",
     );
+
+    const { drive } = await ensureDriveRoot(organizationId, "Documentos");
     let action = "FOLDER_UPDATED";
     if (body.action === "rename") {
       const name = cleanName(body.name ?? "");
@@ -45,6 +63,19 @@ export async function PATCH(
         throw new Error(
           "Uma pasta não pode ser movida para dentro dela mesma.",
         );
+
+      const nextSectorId = target?.sectorId ?? folder.sectorId;
+      const nextStorageSpaceId = target?.storageSpaceId ?? folder.storageSpaceId;
+      if (nextSectorId && nextSectorId !== folder.sectorId) {
+        await assertSectorAccess(
+          tenant.userId,
+          organizationId,
+          nextSectorId,
+          tenant.role,
+          "EDITOR",
+        );
+      }
+
       const current = folder.parentId
         ? await prisma.folder.findUnique({ where: { id: folder.parentId } })
         : null;
@@ -62,10 +93,21 @@ export async function PATCH(
         where: { id },
         data: {
           parentId: target?.id ?? null,
-          sectorId: target?.sectorId ?? folder.sectorId,
-          storageSpaceId: target?.storageSpaceId ?? folder.storageSpaceId,
+          sectorId: nextSectorId,
+          storageSpaceId: nextStorageSpaceId,
         },
       });
+      if (
+        nextSectorId !== folder.sectorId ||
+        nextStorageSpaceId !== folder.storageSpaceId
+      ) {
+        await syncFolderTreeSector({
+          organizationId,
+          rootFolderId: id,
+          sectorId: nextSectorId,
+          storageSpaceId: nextStorageSpaceId,
+        });
+      }
       action = "FOLDER_MOVE";
     } else if (body.action === "trash") {
       if (folder.storageFolderId) {
@@ -83,6 +125,15 @@ export async function PATCH(
         organizationId,
         folder.previousParentId,
       ).catch(() => null);
+      if (previous?.sectorId) {
+        await assertSectorAccess(
+          tenant.userId,
+          organizationId,
+          previous.sectorId,
+          tenant.role,
+          "EDITOR",
+        );
+      }
       if (folder.storageFolderId) {
         try {
           await drive.update(folder.storageFolderId, { trashed: false });
@@ -94,8 +145,21 @@ export async function PATCH(
           parentId: previous?.id ?? null,
           previousParentId: null,
           deletedAt: null,
+          sectorId: previous?.sectorId ?? folder.sectorId,
+          storageSpaceId: previous?.storageSpaceId ?? folder.storageSpaceId,
         },
       });
+      if (
+        (previous?.sectorId ?? folder.sectorId) !== folder.sectorId ||
+        (previous?.storageSpaceId ?? folder.storageSpaceId) !== folder.storageSpaceId
+      ) {
+        await syncFolderTreeSector({
+          organizationId,
+          rootFolderId: id,
+          sectorId: previous?.sectorId ?? folder.sectorId,
+          storageSpaceId: previous?.storageSpaceId ?? folder.storageSpaceId,
+        });
+      }
       action = "FOLDER_RESTORE";
     } else throw new Error("Ação inválida.");
 

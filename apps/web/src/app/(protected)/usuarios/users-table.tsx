@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import { useSession } from "next-auth/react";
 import type { GridColDef } from "@mui/x-data-grid";
 import {
   Alert,
@@ -35,6 +36,7 @@ import { formatCuiabaDateTime } from "@/lib/date";
 import { DataTable } from "@/components/DataTable/DataTable";
 import { StatusChip } from "@/components/StatusChip/StatusChip";
 import { PageHeader } from "@/components/PageHeader/PageHeader";
+import { useActiveTenant } from "@/components/AppShell/ActiveTenantContext";
 
 type Row = {
   id: string;
@@ -61,6 +63,9 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
+  const { data: session } = useSession();
+  const { organizations, activeOrganizationId } = useActiveTenant();
+  const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
   const [rows, setRows] = useState<Row[]>(initialRows);
   const [editingUser, setEditingUser] = useState<Row | null>(null);
   const [deletingUser, setDeletingUser] = useState<Row | null>(null);
@@ -68,20 +73,22 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
 
   const fetchUsers = useCallback(async () => {
     try {
-      const activeOrgId = localStorage.getItem("active-org-id");
-      const url = activeOrgId ? `/api/users?organizationId=${activeOrgId}` : "/api/users";
+      const url = activeOrganizationId ? `/api/users?organizationId=${activeOrganizationId}` : "/api/users";
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setRows(data);
       }
     } catch {}
-  }, []);
+  }, [activeOrganizationId]);
 
   useEffect(() => {
-    void fetchUsers();
+    const timer = window.setTimeout(() => void fetchUsers(), 0);
     window.addEventListener("active-org-changed", fetchUsers);
-    return () => window.removeEventListener("active-org-changed", fetchUsers);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("active-org-changed", fetchUsers);
+    };
   }, [fetchUsers]);
 
   // Form states (Create / Edit)
@@ -89,6 +96,9 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
   const [formEmail, setFormEmail] = useState("");
   const [formRole, setFormRole] = useState<string>("VIEWER");
   const [formPassword, setFormPassword] = useState("");
+  const [formOrganizationIds, setFormOrganizationIds] = useState<string[]>([]);
+  const [formSectorIds, setFormSectorIds] = useState<string[]>([]);
+  const [sectorOptions, setSectorOptions] = useState<Array<{ id: string; name: string; organizationId: string }>>([]);
   const [showPassword, setShowPassword] = useState(false);
   
   const [saving, setSaving] = useState(false);
@@ -102,6 +112,8 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
     setFormEmail("");
     setFormRole("VIEWER");
     setFormPassword("");
+    setFormOrganizationIds(activeOrganizationId ? [activeOrganizationId] : []);
+    setFormSectorIds([]);
     setShowPassword(false);
     setCreateDialogOpen(true);
   };
@@ -118,6 +130,8 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
           email: formEmail,
           password: formPassword,
           role: formRole,
+          organizationId: formOrganizationIds[0] || activeOrganizationId,
+          sectorIds: formSectorIds,
         }),
       });
       const data = await res.json();
@@ -130,6 +144,10 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
         role: formRole,
         status: "ACTIVE",
         lastLoginAt: null,
+        ...(organizations.find((organization) => organization.id === formOrganizationIds[0])?.name
+          ? { organizationName: organizations.find((organization) => organization.id === formOrganizationIds[0])!.name }
+          : {}),
+        sectors: sectorOptions.filter((sector) => formSectorIds.includes(sector.id)),
       };
 
       setRows((prev) => [newRow, ...prev]);
@@ -142,23 +160,34 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
     }
   };
 
-  const openEdit = (user: Row) => {
+  const openEdit = async (user: Row) => {
     setEditingUser(user);
     setFormName(user.name);
     setFormEmail(user.email);
     setFormRole(user.role);
     setFormPassword("");
     setShowPassword(false);
+    try {
+      const response = await fetch(`/api/users/${user.id}`);
+      const detail = await response.json();
+      if (!response.ok) throw new Error(detail.error ?? "Erro ao carregar vínculos.");
+      setFormOrganizationIds(detail.organizationIds ?? []);
+      setFormSectorIds(detail.sectorIds ?? []);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Erro ao carregar vínculos.", "error");
+    }
   };
 
   const handleSaveEdit = async () => {
     if (!editingUser) return;
     setSaving(true);
     try {
-      const body: Record<string, string> = {
+      const body: Record<string, unknown> = {
         name: formName,
         email: formEmail,
         role: formRole,
+        organizationIds: formOrganizationIds,
+        sectorIds: formSectorIds,
       };
       if (formPassword) body.password = formPassword;
 
@@ -186,6 +215,26 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
     }
   };
 
+  useEffect(() => {
+    if (!formOrganizationIds.length) {
+      const timer = window.setTimeout(() => {
+        setSectorOptions([]);
+        setFormSectorIds([]);
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    void Promise.all(formOrganizationIds.map(async (organizationId) => {
+      const response = await fetch(`/api/sectors?organizationId=${organizationId}`);
+      if (!response.ok) return [];
+      const items = await response.json();
+      return Array.isArray(items) ? items.map((item) => ({ id: item.id, name: item.name, organizationId })) : [];
+    })).then((groups) => {
+      const options = groups.flat();
+      setSectorOptions(options);
+      setFormSectorIds((current) => current.filter((id) => options.some((item) => item.id === id)));
+    });
+  }, [formOrganizationIds]);
+
   const handleToggleStatus = async (user: Row) => {
     const newStatus = user.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
     try {
@@ -209,7 +258,7 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
     if (!deletingUser) return;
     setSaving(true);
     try {
-      const res = await fetch(`/api/users/${deletingUser.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/users/${deletingUser.id}?organizationId=${activeOrganizationId}`, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erro ao excluir.");
       setRows((prev) => prev.filter((r) => r.id !== deletingUser.id));
@@ -300,7 +349,7 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
       renderCell: ({ row }) => (
         <Stack direction="row" sx={{ alignItems: "center", gap: 0.5 }}>
           <Tooltip title="Editar usuário">
-            <IconButton size="small" onClick={() => openEdit(row)}>
+            <IconButton size="small" onClick={() => void openEdit(row)}>
               <Edit sx={{ fontSize: 16 }} />
             </IconButton>
           </Tooltip>
@@ -381,6 +430,39 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
             />
             <Box>
               <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                Empresa / Prefeitura
+              </Typography>
+              <Select
+                fullWidth
+                size="small"
+                value={formOrganizationIds[0] ?? ""}
+                onChange={(e) => { setFormOrganizationIds([String(e.target.value)]); setFormSectorIds([]); }}
+                disabled={!isSuperAdmin}
+              >
+                {organizations.map((organization) => (
+                  <MenuItem key={organization.id} value={organization.id}>{organization.name}</MenuItem>
+                ))}
+              </Select>
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                Secretarias
+              </Typography>
+              <Select
+                multiple
+                fullWidth
+                size="small"
+                value={formSectorIds}
+                onChange={(e) => setFormSectorIds(typeof e.target.value === "string" ? e.target.value.split(",") : e.target.value)}
+                renderValue={(ids) => ids.map((id) => sectorOptions.find((sector) => sector.id === id)?.name).filter(Boolean).join(", ") || "Acesso geral / todas"}
+              >
+                {sectorOptions.map((sector) => (
+                  <MenuItem key={sector.id} value={sector.id}>{sector.name}</MenuItem>
+                ))}
+              </Select>
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
                 Perfil de acesso
               </Typography>
               <Select
@@ -389,7 +471,7 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
                 value={formRole}
                 onChange={(e) => setFormRole(e.target.value)}
               >
-                {ROLE_OPTIONS.map((r) => (
+                {ROLE_OPTIONS.filter((r) => isSuperAdmin || r !== "SUPER_ADMIN").map((r) => (
                   <MenuItem key={r} value={r}>{ROLE_LABELS[r]}</MenuItem>
                 ))}
               </Select>
@@ -423,7 +505,7 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
           <Button onClick={() => setCreateDialogOpen(false)} sx={{ borderRadius: 2 }}>Cancelar</Button>
           <Button
             variant="contained"
-            disabled={!formName.trim() || !formEmail.trim() || formPassword.length < 12 || saving}
+            disabled={!formName.trim() || !formEmail.trim() || !formOrganizationIds.length || formPassword.length < 12 || saving}
             onClick={() => void handleSaveCreate()}
             sx={{ borderRadius: 2, px: 3 }}
           >
@@ -464,6 +546,42 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
               value={formEmail}
               onChange={(e) => setFormEmail(e.target.value)}
             />
+            {isSuperAdmin && (
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                  Empresas / Prefeituras vinculadas
+                </Typography>
+                <Select
+                  multiple
+                  fullWidth
+                  size="small"
+                  value={formOrganizationIds}
+                  onChange={(e) => setFormOrganizationIds(typeof e.target.value === "string" ? e.target.value.split(",") : e.target.value)}
+                  renderValue={(ids) => ids.map((id) => organizations.find((organization) => organization.id === id)?.name).filter(Boolean).join(", ")}
+                >
+                  {organizations.map((organization) => (
+                    <MenuItem key={organization.id} value={organization.id}>{organization.name}</MenuItem>
+                  ))}
+                </Select>
+              </Box>
+            )}
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                Secretarias vinculadas
+              </Typography>
+              <Select
+                multiple
+                fullWidth
+                size="small"
+                value={formSectorIds}
+                onChange={(e) => setFormSectorIds(typeof e.target.value === "string" ? e.target.value.split(",") : e.target.value)}
+                renderValue={(ids) => ids.map((id) => sectorOptions.find((sector) => sector.id === id)?.name).filter(Boolean).join(", ") || "Acesso geral / todas"}
+              >
+                {sectorOptions.map((sector) => (
+                  <MenuItem key={sector.id} value={sector.id}>{sector.name}</MenuItem>
+                ))}
+              </Select>
+            </Box>
             <Box>
               <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
                 Perfil de acesso
@@ -474,7 +592,7 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
                 value={formRole}
                 onChange={(e) => setFormRole(e.target.value)}
               >
-                {ROLE_OPTIONS.map((r) => (
+                {ROLE_OPTIONS.filter((r) => isSuperAdmin || r !== "SUPER_ADMIN").map((r) => (
                   <MenuItem key={r} value={r}>{ROLE_LABELS[r]}</MenuItem>
                 ))}
               </Select>
@@ -508,7 +626,7 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
           <Button onClick={() => setEditingUser(null)} sx={{ borderRadius: 2 }}>Cancelar</Button>
           <Button
             variant="contained"
-            disabled={!formName.trim() || !formEmail.trim() || saving}
+            disabled={!formName.trim() || !formEmail.trim() || !formOrganizationIds.length || saving}
             onClick={() => void handleSaveEdit()}
             sx={{ borderRadius: 2, px: 3 }}
           >

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
+import { requireTenantOrganization } from "@/server/tenant";
 import { writeAudit } from "@/server/audit";
 import { assertSectorAccess } from "@/server/sector-access";
 import { z } from "zod";
@@ -9,6 +9,7 @@ type Params = Promise<{ id: string }>;
 
 const updateScheduleSchema = z.object({
   name: z.string().min(1).optional(),
+  frequency: z.enum(["DAILY", "WEEKLY", "MONTHLY"]).optional(),
   time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
   timezone: z.string().optional(),
   retentionDaily: z.number().int().min(1).max(365).optional(),
@@ -18,10 +19,12 @@ const updateScheduleSchema = z.object({
   sourceIds: z.array(z.string().uuid()).min(1).optional(),
 });
 
-export async function GET(_req: Request, { params }: { params: Params }) {
+export async function GET(request: Request, { params }: { params: Params }) {
   try {
-    const tenant = await requireTenant("backup.read");
-    const organizationId = tenant.organizationId!;
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "backup.read",
+      request,
+    );
     const { id } = await params;
 
     const schedule = await prisma.backupSchedule.findFirst({
@@ -59,14 +62,17 @@ export async function GET(_req: Request, { params }: { params: Params }) {
 
 export async function PATCH(request: Request, { params }: { params: Params }) {
   try {
-    const tenant = await requireTenant("backup.manage");
-    const organizationId = tenant.organizationId!;
+    const body = await request.json();
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "backup.manage",
+      request,
+      typeof body?.organizationId === "string" ? body.organizationId : null,
+    );
     const { id } = await params;
 
     const existing = await prisma.backupSchedule.findFirstOrThrow({ where: { id, organizationId } });
     await assertSectorAccess(tenant.userId, organizationId, existing.sectorId, tenant.role, "EDITOR");
 
-    const body = await request.json();
     const result = updateScheduleSchema.safeParse(body);
     if (!result.success) {
       return NextResponse.json({ error: result.error.issues[0]?.message || result.error.message }, { status: 400 });
@@ -146,10 +152,12 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: Params }) {
+export async function DELETE(request: Request, { params }: { params: Params }) {
   try {
-    const tenant = await requireTenant("backup.manage");
-    const organizationId = tenant.organizationId!;
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "backup.manage",
+      request,
+    );
     const { id } = await params;
 
     const schedule = await prisma.backupSchedule.findFirstOrThrow({ where: { id, organizationId } });

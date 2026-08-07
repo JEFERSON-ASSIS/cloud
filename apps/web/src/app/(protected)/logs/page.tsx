@@ -1,4 +1,5 @@
 "use client";
+import { tenantFetch } from "@/lib/tenant-fetch";
 import { useEffect, useState, useCallback } from "react";
 import {
   Alert,
@@ -66,7 +67,7 @@ export default function LogsPage() {
     try {
       const params = new URLSearchParams({ limit: "100" });
       if (levelFilter) params.set("level", levelFilter);
-      const res = await fetch(`/api/backup-logs?${params}`);
+      const res = await tenantFetch(`/api/backup-logs?${params}`);
       if (res.ok) setData(await res.json());
     } finally {
       setLoading(false);

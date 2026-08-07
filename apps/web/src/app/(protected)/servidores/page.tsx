@@ -1,4 +1,5 @@
 "use client";
+import { tenantFetch } from "@/lib/tenant-fetch";
 import { useEffect, useState } from "react";
 import {
   Alert,
@@ -66,7 +67,7 @@ export default function ServidoresPage() {
   const loadServers = async (showProgress = true) => {
     if (showProgress) setLoading(true);
     try {
-      const res = await fetch("/api/servers");
+      const res = await tenantFetch("/api/servers");
       const data = await res.json();
       if (res.ok) setServers(data);
       else setError(data.error || "Erro ao carregar servidores.");
@@ -113,7 +114,7 @@ export default function ServidoresPage() {
     setError("");
     setSuccess("");
     try {
-      const res = await fetch("/api/servers/test", {
+      const res = await tenantFetch("/api/servers/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -144,7 +145,7 @@ export default function ServidoresPage() {
     setError("");
     setSuccess("");
     try {
-      const res = await fetch("/api/servers/test", {
+      const res = await tenantFetch("/api/servers/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ serverId }),
@@ -178,7 +179,7 @@ export default function ServidoresPage() {
       if (password) payload.password = password;
       if (privateKey) payload.privateKey = privateKey;
 
-      const res = await fetch(url, {
+      const res = await tenantFetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -201,7 +202,7 @@ export default function ServidoresPage() {
     setError("");
     setSuccess("");
     try {
-      const res = await fetch(`/api/servers/${id}`, { method: "DELETE" });
+      const res = await tenantFetch(`/api/servers/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (res.ok) {
         setSuccess("Servidor removido.");

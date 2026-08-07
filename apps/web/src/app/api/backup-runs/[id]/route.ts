@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
+import { requireTenantOrganization } from "@/server/tenant";
 
 type Params = Promise<{ id: string }>;
 
 export async function GET(request: Request, { params }: { params: Params }) {
   try {
-    const tenant = await requireTenant("backup.read");
-    const organizationId = tenant.organizationId!;
+    const { organizationId } = await requireTenantOrganization(
+      "backup.read",
+      request,
+    );
     const { id } = await params;
 
     const run = await prisma.backupRun.findFirstOrThrow({
@@ -42,8 +44,10 @@ export async function GET(request: Request, { params }: { params: Params }) {
 
 export async function DELETE(request: Request, { params }: { params: Params }) {
   try {
-    const tenant = await requireTenant("backup.manage");
-    const organizationId = tenant.organizationId!;
+    const { organizationId } = await requireTenantOrganization(
+      "backup.manage",
+      request,
+    );
     const { id } = await params;
 
     await prisma.backupRun.deleteMany({

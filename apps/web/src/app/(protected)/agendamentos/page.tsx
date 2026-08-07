@@ -1,4 +1,5 @@
 "use client";
+import { tenantFetch } from "@/lib/tenant-fetch";
 import { useEffect, useState, useCallback } from "react";
 import {
   Alert,
@@ -106,7 +107,7 @@ export default function AgendamentosPage() {
   const fetchSchedules = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/schedules");
+      const res = await tenantFetch("/api/schedules");
       if (res.ok) setSchedules(await res.json());
     } finally {
       setLoading(false);
@@ -114,7 +115,7 @@ export default function AgendamentosPage() {
   }, []);
 
   const fetchSources = useCallback(async () => {
-    const res = await fetch("/api/backup-sources");
+    const res = await tenantFetch("/api/backup-sources");
     if (res.ok) setSources(await res.json());
   }, []);
 
@@ -155,8 +156,8 @@ export default function AgendamentosPage() {
     try {
       const payload = { name, frequency, time, timezone, retentionDaily, retentionWeekly, retentionMonthly, sourceIds: selectedSources };
       const res = editing
-        ? await fetch(`/api/schedules/${editing.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
-        : await fetch("/api/schedules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        ? await tenantFetch(`/api/schedules/${editing.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+        : await tenantFetch("/api/schedules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Erro ao salvar."); return; }
       setSuccess(editing ? "Agendamento atualizado!" : "Agendamento criado!");
@@ -170,12 +171,12 @@ export default function AgendamentosPage() {
 
   async function handleDelete(id: string) {
     if (!confirm("Deseja excluir este agendamento?")) return;
-    await fetch(`/api/schedules/${id}`, { method: "DELETE" });
+    await tenantFetch(`/api/schedules/${id}`, { method: "DELETE" });
     void fetchSchedules();
   }
 
   async function handleToggle(s: Schedule) {
-    await fetch(`/api/schedules/${s.id}`, {
+    await tenantFetch(`/api/schedules/${s.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ active: !s.active }),

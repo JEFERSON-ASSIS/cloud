@@ -1,4 +1,5 @@
 "use client";
+import { tenantFetch } from "@/lib/tenant-fetch";
 
 import { useEffect, useState } from "react";
 import {
@@ -21,7 +22,7 @@ export function UploadLimitClient() {
   const [msg, setMsg] = useState<{ text: string; severity: "success" | "error" } | null>(null);
 
   useEffect(() => {
-    fetch("/api/settings/upload-limit")
+    tenantFetch("/api/settings/upload-limit")
       .then((res) => res.json())
       .then((data) => {
         if (data.maxUploadSizeMB) setLimitMB(data.maxUploadSizeMB);
@@ -34,7 +35,7 @@ export function UploadLimitClient() {
     setSaving(true);
     setMsg(null);
     try {
-      const res = await fetch("/api/settings/upload-limit", {
+      const res = await tenantFetch("/api/settings/upload-limit", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ maxUploadSizeMB: limitMB }),

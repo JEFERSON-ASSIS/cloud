@@ -58,3 +58,54 @@ export async function isDescendant(
   }
   return false;
 }
+
+export async function collectFolderSubtreeIds(
+  organizationId: string,
+  rootFolderId: string,
+): Promise<string[]> {
+  const ids = [rootFolderId];
+  const queue = [rootFolderId];
+  while (queue.length > 0) {
+    const parentId = queue.shift()!;
+    const children = await prisma.folder.findMany({
+      where: { organizationId, parentId },
+      select: { id: true },
+    });
+    for (const child of children) {
+      ids.push(child.id);
+      queue.push(child.id);
+    }
+  }
+  return ids;
+}
+
+export async function syncFolderTreeSector(input: {
+  organizationId: string;
+  rootFolderId: string;
+  sectorId: string | null;
+  storageSpaceId: string | null;
+}) {
+  const folderIds = await collectFolderSubtreeIds(
+    input.organizationId,
+    input.rootFolderId,
+  );
+  await prisma.$transaction([
+    prisma.folder.updateMany({
+      where: { organizationId: input.organizationId, id: { in: folderIds } },
+      data: {
+        sectorId: input.sectorId,
+        storageSpaceId: input.storageSpaceId,
+      },
+    }),
+    prisma.document.updateMany({
+      where: {
+        organizationId: input.organizationId,
+        folderId: { in: folderIds },
+      },
+      data: {
+        sectorId: input.sectorId,
+        storageSpaceId: input.storageSpaceId,
+      },
+    }),
+  ]);
+}

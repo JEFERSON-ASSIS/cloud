@@ -1,13 +1,16 @@
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
+import { requireTenantOrganization } from "@/server/tenant";
 import { driveForOrganization } from "@/server/google-drive";
 import { writeAudit } from "@/server/audit";
 
 export async function GET(request: Request) {
   try {
-    const tenant = await requireTenant("document.read");
+    const { organizationId } = await requireTenantOrganization(
+      "document.read",
+      request,
+    );
     if (new URL(request.url).searchParams.get("folders") === "1") {
-      const { drive } = await driveForOrganization(tenant.organizationId!);
+      const { drive } = await driveForOrganization(organizationId);
       const folders = (await drive.list("root")).filter(
         (item) => item.mimeType === "application/vnd.google-apps.folder",
       );
@@ -15,7 +18,7 @@ export async function GET(request: Request) {
     }
     const connection = await prisma.storageConnection.findFirst({
       where: {
-        organizationId: tenant.organizationId!,
+        organizationId,
         provider: "GOOGLE_DRIVE",
         deletedAt: null,
       },
@@ -44,14 +47,18 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const tenant = await requireTenant("integration.manage");
-    const { rootFolderId } = (await request.json()) as {
+    const body = (await request.json()) as {
       rootFolderId?: string;
+      organizationId?: string;
     };
-    if (!rootFolderId) throw new Error("Selecione uma pasta.");
-    const { connection, drive } = await driveForOrganization(
-      tenant.organizationId!,
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "integration.manage",
+      request,
+      typeof body?.organizationId === "string" ? body.organizationId : null,
     );
+    const { rootFolderId } = body;
+    if (!rootFolderId) throw new Error("Selecione uma pasta.");
+    const { connection, drive } = await driveForOrganization(organizationId);
     const metadata = await drive.getMetadata(rootFolderId);
     if (metadata.mimeType !== "application/vnd.google-apps.folder")
       throw new Error("O item selecionado não é uma pasta.");
@@ -60,7 +67,7 @@ export async function PATCH(request: Request) {
       data: { rootFolderId },
     });
     await writeAudit({
-      organizationId: tenant.organizationId,
+      organizationId,
       userId: tenant.userId,
       action: "GOOGLE_DRIVE_ROOT_CHANGED",
       resourceType: "StorageConnection",
@@ -76,12 +83,13 @@ export async function PATCH(request: Request) {
   }
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    const tenant = await requireTenant("integration.manage");
-    const { connection, drive } = await driveForOrganization(
-      tenant.organizationId!,
+    const { organizationId } = await requireTenantOrganization(
+      "integration.manage",
+      request,
     );
+    const { connection, drive } = await driveForOrganization(organizationId);
     await drive.testConnection();
     const quota = await drive.getQuota();
     await prisma.googleDriveConnection.update({
@@ -101,12 +109,15 @@ export async function POST() {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
   try {
-    const tenant = await requireTenant("integration.manage");
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "integration.manage",
+      request,
+    );
     const connection = await prisma.storageConnection.findFirst({
       where: {
-        organizationId: tenant.organizationId!,
+        organizationId,
         provider: "GOOGLE_DRIVE",
         deletedAt: null,
       },
@@ -122,7 +133,7 @@ export async function DELETE() {
         }),
       ]);
       await writeAudit({
-        organizationId: tenant.organizationId,
+        organizationId,
         userId: tenant.userId,
         action: "GOOGLE_DRIVE_DISCONNECTED",
         resourceType: "StorageConnection",

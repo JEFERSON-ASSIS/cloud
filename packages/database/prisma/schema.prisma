@@ -118,6 +118,7 @@ model Organization {
   document             String?
   status               OrganizationStatus    @default(ACTIVE)
   storageLimit         BigInt                @default(10737418240) @map("storage_limit")
+  maxUploadFileSize    BigInt                @default(104857600) @map("max_upload_file_size")
   createdById          String?               @map("created_by_id") @db.Uuid
   createdAt            DateTime              @default(now()) @map("created_at")
   updatedAt            DateTime              @updatedAt @map("updated_at")
@@ -503,4 +504,3 @@ model StorageSpace {
   @@unique([sectorId, name])
   @@map("storage_spaces")
 }
-

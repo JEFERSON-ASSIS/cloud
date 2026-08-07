@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@i7ai/database";
-import { requireTenant } from "@/server/tenant";
+import { requireTenantOrganization } from "@/server/tenant";
 import { writeAudit } from "@/server/audit";
 import { assertSectorAccess, getUserSectorIds } from "@/server/sector-access";
 import { z } from "zod";
@@ -18,13 +18,10 @@ const createScheduleSchema = z.object({
 
 export async function GET(request: Request) {
   try {
-    const tenant = await requireTenant("backup.read");
-    const url = new URL(request.url);
-    const paramOrgId = url.searchParams.get("organizationId");
-    const organizationId =
-      tenant.role === "SUPER_ADMIN" && paramOrgId
-        ? paramOrgId
-        : tenant.organizationId!;
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "backup.read",
+      request,
+    );
     const allowedSectorIds = await getUserSectorIds(tenant.userId, organizationId, tenant.role);
 
     const whereClause: any = { organizationId };
@@ -70,10 +67,12 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const tenant = await requireTenant("backup.manage");
-    const organizationId = tenant.organizationId!;
-
     const body = await request.json();
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "backup.manage",
+      request,
+      typeof body?.organizationId === "string" ? body.organizationId : null,
+    );
     const result = createScheduleSchema.safeParse(body);
     if (!result.success) {
       return NextResponse.json({ error: result.error.issues[0]?.message || result.error.message }, { status: 400 });

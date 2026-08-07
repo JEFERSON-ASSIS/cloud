@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
-import { requireTenant } from "@/server/tenant";
+import { requireTenantOrganization } from "@/server/tenant";
 import { sendBackupNotification } from "@i7ai/backup-core";
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    const tenant = await requireTenant("organization.manage");
+    const { organizationId } = await requireTenantOrganization(
+      "organization.manage",
+      request,
+    );
 
     const result = await sendBackupNotification({
-      organizationId: tenant.organizationId!,
+      organizationId,
       event: "SUCCESS",
       sourceName: "Servidor de Teste (Manual)",
       runId: "test-run-" + Date.now(),

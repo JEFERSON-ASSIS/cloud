@@ -1,4 +1,5 @@
 "use client";
+import { tenantFetch } from "@/lib/tenant-fetch";
 import { useEffect, useState } from "react";
 import {
   Alert,
@@ -114,10 +115,10 @@ export default function BackupsPage() {
       const queryParam = activeOrgId ? `?organizationId=${activeOrgId}` : "";
 
       const [resServers, resSectors, resSources, resRuns] = await Promise.all([
-        fetch(`/api/servers${queryParam}`),
-        fetch(`/api/sectors${queryParam}`),
-        fetch(`/api/backup-sources${queryParam}`),
-        fetch(`/api/backup-runs${queryParam}`),
+        tenantFetch(`/api/servers${queryParam}`),
+        tenantFetch(`/api/sectors${queryParam}`),
+        tenantFetch(`/api/backup-sources${queryParam}`),
+        tenantFetch(`/api/backup-runs${queryParam}`),
       ]);
       const dataServers = await resServers.json();
       const dataSectors = await resSectors.json();
@@ -152,7 +153,7 @@ export default function BackupsPage() {
     if (!pollingRunId) return;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/backup-runs/${pollingRunId}`);
+        const res = await tenantFetch(`/api/backup-runs/${pollingRunId}`);
         const data = await res.json();
         if (res.ok) {
           // Atualizar o selectedRun se estiver visualizando o log dele
@@ -205,7 +206,7 @@ export default function BackupsPage() {
   const handleOpenEdit = async (source: BackupSource) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/backup-sources/${source.id}`);
+      const res = await tenantFetch(`/api/backup-sources/${source.id}`);
       const data = await res.json();
       if (res.ok) {
         setEditingSource(data);
@@ -264,7 +265,7 @@ export default function BackupsPage() {
       const url = editingSource ? `/api/backup-sources/${editingSource.id}` : "/api/backup-sources";
       const method = editingSource ? "PATCH" : "POST";
 
-      const res = await fetch(url, {
+      const res = await tenantFetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -286,7 +287,7 @@ export default function BackupsPage() {
     if (!confirm("Tem certeza que deseja remover esta origem de backup?")) return;
     setError("");
     try {
-      const res = await fetch(`/api/backup-sources/${id}`, { method: "DELETE" });
+      const res = await tenantFetch(`/api/backup-sources/${id}`, { method: "DELETE" });
       if (res.ok) {
         setSuccess("Origem removida.");
         await loadData();
@@ -303,7 +304,7 @@ export default function BackupsPage() {
     setError("");
     setSuccess("");
     try {
-      const res = await fetch(`/api/backup-sources/${id}`, { method: "POST" });
+      const res = await tenantFetch(`/api/backup-sources/${id}`, { method: "POST" });
       const data = await res.json();
       if (res.ok) {
         setSuccess("Backup enfileirado com sucesso!");
@@ -325,7 +326,7 @@ export default function BackupsPage() {
     setError("");
     setSuccess("");
     try {
-      const res = await fetch("/api/backups/restore", {
+      const res = await tenantFetch("/api/backups/restore", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ backupRunId: runId }),
@@ -346,7 +347,7 @@ export default function BackupsPage() {
     if (!confirm("Tem certeza que deseja excluir este registro de execução do histórico?")) return;
     setError("");
     try {
-      const res = await fetch(`/api/backup-runs/${id}`, { method: "DELETE" });
+      const res = await tenantFetch(`/api/backup-runs/${id}`, { method: "DELETE" });
       if (res.ok) {
         setSuccess("Registro de execução excluído com sucesso.");
         await loadData(false);
@@ -367,7 +368,7 @@ export default function BackupsPage() {
       setPollingRunId(run.id);
     }
     try {
-      const res = await fetch(`/api/backup-runs/${run.id}`);
+      const res = await tenantFetch(`/api/backup-runs/${run.id}`);
       const data = await res.json();
       if (res.ok) {
         setRunLogs(data.logs || []);

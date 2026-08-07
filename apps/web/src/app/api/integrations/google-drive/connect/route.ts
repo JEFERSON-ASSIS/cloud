@@ -1,12 +1,15 @@
-import { requireTenant } from "@/server/tenant";
+import { requireTenantOrganization } from "@/server/tenant";
 import { createOAuthState } from "@/server/oauth-state";
 import { googleAuthorizationUrl } from "@/server/google-drive";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const tenant = await requireTenant("integration.manage");
+    const { tenant, organizationId } = await requireTenantOrganization(
+      "integration.manage",
+      request,
+    );
     const state = createOAuthState({
-      organizationId: tenant.organizationId!,
+      organizationId,
       userId: tenant.userId,
       expiresAt: Date.now() + 10 * 60_000,
     });
