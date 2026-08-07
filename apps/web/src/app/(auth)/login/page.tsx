@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -38,9 +38,12 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>;
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
-  const [error, setError] = useState("");
+  const searchParams = useSearchParams();
+  const urlError = searchParams.get("error");
+
+  const [formError, setFormError] = useState("");
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const {
@@ -49,11 +52,29 @@ export default function LoginPage() {
     formState: { errors, isSubmitting },
   } = useForm<FormData>({ resolver: zodResolver(schema) });
 
+  const getErrorMessage = () => {
+    if (formError) return formError;
+    if (!urlError) return "";
+    switch (urlError) {
+      case "AccessDenied":
+        return "Você não possui cadastro no sistema. Entre em contato com o administrador da sua prefeitura.";
+      case "Configuration":
+        return "Configuração ou credenciais OAuth pendentes. Entre em contato com o administrador da sua prefeitura.";
+      case "OAuthSignin":
+      case "OAuthCallback":
+        return "Erro ao conectar com o Google. Tente novamente.";
+      case "CredentialsSignin":
+        return "E-mail ou senha incorretos.";
+      default:
+        return "Você não possui cadastro no sistema. Entre em contato com o administrador da sua prefeitura.";
+    }
+  };
+
   const submit = async (data: FormData) => {
-    setError("");
+    setFormError("");
     const result = await signIn("credentials", { ...data, redirect: false });
     if (result?.error) {
-      setError("E-mail ou senha inválidos.");
+      setFormError("E-mail ou senha inválidos.");
       return;
     }
     router.replace("/dashboard");
@@ -61,57 +82,68 @@ export default function LoginPage() {
   };
 
   const handleGoogleLogin = async () => {
-    setError("");
+    setFormError("");
     setGoogleLoading(true);
     try {
       await signIn("google", { callbackUrl: "/dashboard" });
     } catch {
-      setError("Erro ao tentar entrar com o Google.");
+      setFormError("Erro ao iniciar sessão com o Google.");
       setGoogleLoading(false);
     }
   };
 
+  const activeError = getErrorMessage();
+
   return (
     <Box
       sx={{
-        minHeight: "100vh",
-        bgcolor: "#0f0b29", // Indigo-950 institucional i7AI
+        height: "100vh",
+        maxHeight: "100vh",
+        bgcolor: "#0f0b29", // Fundo oficial i7AI
         backgroundImage:
           "radial-gradient(circle at 15% 20%, rgba(99, 102, 241, 0.18) 0%, transparent 45%), radial-gradient(circle at 85% 80%, rgba(79, 70, 229, 0.15) 0%, transparent 50%)",
         color: "white",
         display: "flex",
         alignItems: "center",
-        py: { xs: 4, md: 8 },
-        px: { xs: 2, md: 6 },
+        justifyContent: "center",
+        px: { xs: 2, md: 4, lg: 6 },
+        py: { xs: 1, sm: 2 },
+        overflow: "hidden",
         fontFamily: "'Inter', sans-serif",
       }}
     >
-      <Container maxWidth="xl">
-        <Grid container spacing={6} sx={{ alignItems: "center" }}>
-          {/* LADO ESQUERDO: Apresentação Institucional i7AI */}
+      <Container maxWidth="xl" disableGutters sx={{ px: { xs: 1, sm: 2, lg: 4 } }}>
+        <Grid container spacing={{ xs: 3, lg: 5 }} sx={{ alignItems: "center" }}>
+          {/* LADO ESQUERDO: Apresentação Institucional Cloud Manager */}
           <Grid size={{ xs: 12, lg: 7 }}>
-            <Stack spacing={4} sx={{ maxWidth: 720, mx: { xs: "auto", lg: 0 } }}>
-              {/* Logo Oficial i7AI (Tamanho Exato do Portal) */}
-              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+            <Stack
+              spacing={{ xs: 1.5, sm: 2, lg: 2.5 }}
+              sx={{
+                maxWidth: 680,
+                mx: "auto",
+                alignItems: "center",
+                textAlign: "center",
+              }}
+            >
+              {/* Logo Emblem i7AI Proporcional ao Viewport */}
+              <Box sx={{ display: "flex", justifyContent: "center", width: "100%" }}>
                 <Box
                   component="img"
                   src="/i7ai-logo.png"
                   alt="I7AI Sistemas Inteligentes"
                   sx={{
-                    width: 230,
-                    height: "auto",
+                    height: { xs: 70, sm: 95, lg: 110 },
+                    width: "auto",
                     display: "block",
-                    transform: "scale(1.25)",
-                    transformOrigin: "left center",
-                    filter: "drop-shadow(0 0 20px rgba(99, 102, 241, 0.4))",
+                    filter: "drop-shadow(0 0 25px rgba(99, 102, 241, 0.45))",
                   }}
                 />
               </Box>
 
               {/* Badge B2G */}
-              <Box>
+              <Box sx={{ display: "flex", justifyContent: "center" }}>
                 <Chip
-                  icon={<AccountBalance sx={{ fontSize: 16, color: "#818cf8 !important" }} />}
+                  icon={<AccountBalance sx={{ fontSize: 14, color: "#818cf8 !important" }} />}
                   label="SOLUÇÃO B2G • PARA PREFEITURAS E REDES PÚBLICAS"
                   sx={{
                     bgcolor: "rgba(99, 102, 241, 0.18)",
@@ -120,72 +152,73 @@ export default function LoginPage() {
                     borderWidth: 1,
                     borderStyle: "solid",
                     fontWeight: 800,
-                    fontSize: 11,
-                    letterSpacing: 1,
-                    px: 1.5,
-                    py: 0.5,
+                    fontSize: { xs: 9.5, sm: 10.5 },
+                    letterSpacing: 0.8,
+                    px: 1.2,
+                    height: 26,
                     borderRadius: 2,
                   }}
                 />
               </Box>
 
-              {/* Título Principal */}
+              {/* Título Principal Cloud Manager */}
               <Typography
                 variant="h2"
                 sx={{
                   fontWeight: 800,
-                  fontSize: { xs: 32, sm: 44, md: 54 },
-                  lineHeight: 1.12,
+                  fontSize: { xs: 22, sm: 32, lg: 40 },
+                  lineHeight: 1.15,
                   color: "#ffffff",
                   letterSpacing: "-0.03em",
                 }}
               >
-                Tecnologia para uma gestão pública inclusiva, integrada e segura.
+                Seus documentos e backups, organizados com segurança.
               </Typography>
 
-              {/* Subtítulo */}
+              {/* Subtítulo Cloud Manager */}
               <Typography
                 sx={{
-                  fontSize: { xs: 16, sm: 18 },
+                  fontSize: { xs: 13, sm: 15, lg: 16 },
                   color: "#cbd5e1",
-                  lineHeight: 1.65,
-                  maxWidth: 640,
+                  lineHeight: 1.5,
+                  maxWidth: 600,
                 }}
               >
                 Organize backups municipais, conecte secretarias e preserve a
                 trajetória e a segurança de dados de cada departamento em uma única plataforma.
               </Typography>
 
-              {/* 3 Cards de Funcionalidades no Rodapé */}
-              <Grid container spacing={2} sx={{ pt: 2 }}>
+              {/* 3 Cards Cloud Manager no Rodapé */}
+              <Grid container spacing={1.5} sx={{ pt: 0.5, width: "100%" }}>
                 <Grid size={{ xs: 12, sm: 4 }}>
                   <Box
                     sx={{
-                      p: 2.5,
-                      borderRadius: 3,
+                      p: { xs: 1.5, lg: 2 },
+                      borderRadius: 2.5,
                       bgcolor: "rgba(255, 255, 255, 0.04)",
                       border: "1px solid rgba(255, 255, 255, 0.1)",
                       height: "100%",
+                      textAlign: "left",
                     }}
                   >
                     <Box
                       sx={{
-                        width: 38,
-                        height: 38,
-                        borderRadius: 2,
+                        width: 30,
+                        height: 30,
+                        borderRadius: 1.5,
                         bgcolor: "rgba(99, 102, 241, 0.25)",
                         color: "#818cf8",
                         display: "grid",
                         placeItems: "center",
-                        mb: 1.5,
+                        mb: 0.75,
                       }}
                     >
-                      <ShieldOutlined fontSize="small" />
+                      <ShieldOutlined sx={{ fontSize: 17 }} />
                     </Box>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "white", mb: 0.5 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "white", mb: 0.25, fontSize: 12.5 }}>
                       Gestão Pública Integrada
                     </Typography>
-                    <Typography variant="caption" sx={{ color: "#94a3b8", lineHeight: 1.4, display: "block" }}>
+                    <Typography variant="caption" sx={{ color: "#94a3b8", lineHeight: 1.3, display: "block", fontSize: 10.5 }}>
                       Registros, secretarias e backups organizados no mesmo fluxo.
                     </Typography>
                   </Box>
@@ -194,31 +227,32 @@ export default function LoginPage() {
                 <Grid size={{ xs: 12, sm: 4 }}>
                   <Box
                     sx={{
-                      p: 2.5,
-                      borderRadius: 3,
+                      p: { xs: 1.5, lg: 2 },
+                      borderRadius: 2.5,
                       bgcolor: "rgba(255, 255, 255, 0.04)",
                       border: "1px solid rgba(255, 255, 255, 0.1)",
                       height: "100%",
+                      textAlign: "left",
                     }}
                   >
                     <Box
                       sx={{
-                        width: 38,
-                        height: 38,
-                        borderRadius: 2,
+                        width: 30,
+                        height: 30,
+                        borderRadius: 1.5,
                         bgcolor: "rgba(16, 185, 129, 0.2)",
                         color: "#10b981",
                         display: "grid",
                         placeItems: "center",
-                        mb: 1.5,
+                        mb: 0.75,
                       }}
                     >
-                      <VerifiedUserOutlined fontSize="small" />
+                      <VerifiedUserOutlined sx={{ fontSize: 17 }} />
                     </Box>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "white", mb: 0.5 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "white", mb: 0.25, fontSize: 12.5 }}>
                       Segurança & Controle
                     </Typography>
-                    <Typography variant="caption" sx={{ color: "#94a3b8", lineHeight: 1.4, display: "block" }}>
+                    <Typography variant="caption" sx={{ color: "#94a3b8", lineHeight: 1.3, display: "block", fontSize: 10.5 }}>
                       Perfis e permissões para proteger informações institucionais.
                     </Typography>
                   </Box>
@@ -227,31 +261,32 @@ export default function LoginPage() {
                 <Grid size={{ xs: 12, sm: 4 }}>
                   <Box
                     sx={{
-                      p: 2.5,
-                      borderRadius: 3,
+                      p: { xs: 1.5, lg: 2 },
+                      borderRadius: 2.5,
                       bgcolor: "rgba(255, 255, 255, 0.04)",
                       border: "1px solid rgba(255, 255, 255, 0.1)",
                       height: "100%",
+                      textAlign: "left",
                     }}
                   >
                     <Box
                       sx={{
-                        width: 38,
-                        height: 38,
-                        borderRadius: 2,
+                        width: 30,
+                        height: 30,
+                        borderRadius: 1.5,
                         bgcolor: "rgba(99, 102, 241, 0.25)",
                         color: "#818cf8",
                         display: "grid",
                         placeItems: "center",
-                        mb: 1.5,
+                        mb: 0.75,
                       }}
                     >
-                      <BackupOutlined fontSize="small" />
+                      <BackupOutlined sx={{ fontSize: 17 }} />
                     </Box>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "white", mb: 0.5 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "white", mb: 0.25, fontSize: 12.5 }}>
                       Continuidade & Recovery
                     </Typography>
-                    <Typography variant="caption" sx={{ color: "#94a3b8", lineHeight: 1.4, display: "block" }}>
+                    <Typography variant="caption" sx={{ color: "#94a3b8", lineHeight: 1.3, display: "block", fontSize: 10.5 }}>
                       Histórico preservado para decisões mais seguras ao longo da jornada.
                     </Typography>
                   </Box>
@@ -260,20 +295,20 @@ export default function LoginPage() {
             </Stack>
           </Grid>
 
-          {/* LADO DIREITO: Form de Login Flutuante Estilo Institucional */}
+          {/* LADO DIREITO: Card Institucional Branco */}
           <Grid size={{ xs: 12, lg: 5 }}>
-            <Box sx={{ maxWidth: 450, mx: "auto" }}>
+            <Box sx={{ maxWidth: 420, mx: "auto" }}>
               <Card
                 sx={{
                   bgcolor: "#ffffff",
                   color: "#1e293b",
-                  borderRadius: 4,
-                  boxShadow: "0 26px 70px rgba(15, 23, 42, 0.35)",
-                  p: { xs: 3, sm: 4 },
+                  borderRadius: 3.5,
+                  boxShadow: "0 20px 45px rgba(0, 0, 0, 0.4)",
+                  p: { xs: 2.5, sm: 3 },
                 }}
               >
                 <CardContent sx={{ p: 0 }}>
-                  <Stack spacing={3}>
+                  <Stack spacing={2}>
                     {/* Header do Card */}
                     <Box>
                       <Typography
@@ -283,31 +318,32 @@ export default function LoginPage() {
                           fontWeight: 800,
                           letterSpacing: 1.2,
                           textTransform: "uppercase",
+                          fontSize: 10,
                         }}
                       >
                         ÁREA INSTITUCIONAL
                       </Typography>
                       <Typography
-                        variant="h4"
-                        sx={{ fontWeight: 800, color: "#0f0b29", mt: 0.5 }}
+                        variant="h5"
+                        sx={{ fontWeight: 800, color: "#0f0b29", mt: 0.25, fontSize: { xs: 20, sm: 22 } }}
                       >
                         Acesso ao sistema
                       </Typography>
-                      <Typography variant="body2" sx={{ color: "#64748b", mt: 0.5 }}>
+                      <Typography variant="body2" sx={{ color: "#64748b", mt: 0.25, fontSize: 12.5 }}>
                         Utilize suas credenciais institucionais para acessar o painel de gestão.
                       </Typography>
                     </Box>
 
-                    {error && (
-                      <Alert severity="error" sx={{ borderRadius: 2 }}>
-                        {error}
+                    {activeError && (
+                      <Alert severity="error" sx={{ borderRadius: 2, py: 0.5, px: 1.5, fontSize: 12 }}>
+                        {activeError}
                       </Alert>
                     )}
 
                     {/* Formulário */}
                     <Stack
                       component="form"
-                      spacing={2.5}
+                      spacing={1.75}
                       onSubmit={handleSubmit(submit)}
                     >
                       <Box>
@@ -316,17 +352,17 @@ export default function LoginPage() {
                           sx={{
                             fontWeight: 700,
                             color: "#334155",
-                            mb: 0.75,
+                            mb: 0.5,
                             display: "block",
                             textTransform: "uppercase",
-                            fontSize: 11,
+                            fontSize: 10,
                           }}
                         >
                           E-MAIL PROFISSIONAL
                         </Typography>
                         <TextField
                           fullWidth
-                          size="medium"
+                          size="small"
                           placeholder="nome@prefeitura.gov.br"
                           {...register("email")}
                           error={Boolean(errors.email)}
@@ -335,7 +371,7 @@ export default function LoginPage() {
                             input: {
                               startAdornment: (
                                 <InputAdornment position="start">
-                                  <EmailOutlined sx={{ color: "#94a3b8" }} />
+                                  <EmailOutlined sx={{ color: "#94a3b8", fontSize: 18 }} />
                                 </InputAdornment>
                               ),
                             },
@@ -343,7 +379,7 @@ export default function LoginPage() {
                           sx={{
                             "& .MuiOutlinedInput-root": {
                               bgcolor: "#f8faff",
-                              borderRadius: 2.5,
+                              borderRadius: 2,
                               "& fieldset": { borderColor: "#cbd5e1" },
                               "&:hover fieldset": { borderColor: "#94a3b8" },
                               "&.Mui-focused fieldset": { borderColor: "#4f46e5" },
@@ -358,10 +394,10 @@ export default function LoginPage() {
                           sx={{
                             fontWeight: 700,
                             color: "#334155",
-                            mb: 0.75,
+                            mb: 0.5,
                             display: "block",
                             textTransform: "uppercase",
-                            fontSize: 11,
+                            fontSize: 10,
                           }}
                         >
                           SUA SENHA
@@ -369,7 +405,7 @@ export default function LoginPage() {
                         <TextField
                           fullWidth
                           type="password"
-                          size="medium"
+                          size="small"
                           placeholder="••••••••"
                           {...register("password")}
                           error={Boolean(errors.password)}
@@ -378,7 +414,7 @@ export default function LoginPage() {
                             input: {
                               startAdornment: (
                                 <InputAdornment position="start">
-                                  <LockOutlined sx={{ color: "#94a3b8" }} />
+                                  <LockOutlined sx={{ color: "#94a3b8", fontSize: 18 }} />
                                 </InputAdornment>
                               ),
                             },
@@ -386,7 +422,7 @@ export default function LoginPage() {
                           sx={{
                             "& .MuiOutlinedInput-root": {
                               bgcolor: "#f8faff",
-                              borderRadius: 2.5,
+                              borderRadius: 2,
                               "& fieldset": { borderColor: "#cbd5e1" },
                               "&:hover fieldset": { borderColor: "#94a3b8" },
                               "&.Mui-focused fieldset": { borderColor: "#4f46e5" },
@@ -399,21 +435,21 @@ export default function LoginPage() {
                         type="submit"
                         fullWidth
                         variant="contained"
-                        size="large"
+                        size="medium"
                         disabled={isSubmitting || googleLoading}
-                        endIcon={<ArrowForward />}
+                        endIcon={<ArrowForward sx={{ fontSize: 18 }} />}
                         sx={{
                           background: "linear-gradient(135deg, #6366f1, #4f46e5)",
                           color: "white",
-                          py: 1.5,
-                          borderRadius: 2.5,
+                          py: 1.1,
+                          borderRadius: 2,
                           fontWeight: 800,
-                          fontSize: 15,
+                          fontSize: 14,
                           textTransform: "none",
-                          boxShadow: "0 14px 26px rgba(99, 102, 241, 0.28)",
+                          boxShadow: "0 8px 18px rgba(99, 102, 241, 0.28)",
                           "&:hover": {
                             background: "linear-gradient(135deg, #4f46e5, #3730a3)",
-                            boxShadow: "0 16px 30px rgba(99, 102, 241, 0.38)",
+                            boxShadow: "0 12px 22px rgba(99, 102, 241, 0.38)",
                           },
                         }}
                       >
@@ -422,7 +458,7 @@ export default function LoginPage() {
                     </Stack>
 
                     <Divider sx={{ borderColor: "#e2e8f0" }}>
-                      <Typography variant="caption" sx={{ color: "#94a3b8", fontWeight: 700, fontSize: 10 }}>
+                      <Typography variant="caption" sx={{ color: "#94a3b8", fontWeight: 700, fontSize: 9 }}>
                         OU CONTINUE COM
                       </Typography>
                     </Divider>
@@ -431,11 +467,11 @@ export default function LoginPage() {
                     <Button
                       fullWidth
                       variant="outlined"
-                      size="large"
+                      size="medium"
                       onClick={handleGoogleLogin}
                       disabled={googleLoading || isSubmitting}
                       startIcon={
-                        <svg width="20" height="20" viewBox="0 0 24 24">
+                        <svg width="18" height="18" viewBox="0 0 24 24">
                           <path
                             fill="#4285F4"
                             d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -457,10 +493,11 @@ export default function LoginPage() {
                       sx={{
                         borderColor: "#cbd5e1",
                         color: "#334155",
-                        py: 1.2,
-                        borderRadius: 2.5,
+                        py: 0.9,
+                        borderRadius: 2,
                         textTransform: "none",
                         fontWeight: 600,
+                        fontSize: 13,
                         "&:hover": {
                           borderColor: "#94a3b8",
                           bgcolor: "#f8faff",
@@ -470,9 +507,9 @@ export default function LoginPage() {
                       {googleLoading ? "Conectando ao Google..." : "Continuar com Google"}
                     </Button>
 
-                    <Stack direction="row" spacing={1} sx={{ justifyContent: "center", alignItems: "center", pt: 1 }}>
-                      <ShieldOutlined sx={{ fontSize: 16, color: "#10b981" }} />
-                      <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 500 }}>
+                    <Stack direction="row" spacing={1} sx={{ justifyContent: "center", alignItems: "center" }}>
+                      <ShieldOutlined sx={{ fontSize: 14, color: "#10b981" }} />
+                      <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 500, fontSize: 10.5 }}>
                         Ambiente seguro e acesso restrito a usuários autorizados.
                       </Typography>
                     </Stack>
@@ -481,13 +518,13 @@ export default function LoginPage() {
 
                     {/* Footer CNPJ e Empresa */}
                     <Box sx={{ textAlign: "center" }}>
-                      <Typography variant="caption" sx={{ color: "#475569", fontWeight: 800, display: "block" }}>
+                      <Typography variant="caption" sx={{ color: "#475569", fontWeight: 800, display: "block", fontSize: 10.5 }}>
                         I7AI SISTEMAS INTELIGENTES LTDA
                       </Typography>
-                      <Typography variant="caption" sx={{ color: "#94a3b8", display: "block", fontSize: 10, mt: 0.25 }}>
+                      <Typography variant="caption" sx={{ color: "#94a3b8", display: "block", fontSize: 9, mt: 0.25 }}>
                         CNPJ: 52.177.930/0001-01 | Telefone: (66) 99655-3735
                       </Typography>
-                      <Typography variant="caption" sx={{ color: "#94a3b8", display: "block", fontSize: 10, mt: 0.25 }}>
+                      <Typography variant="caption" sx={{ color: "#94a3b8", display: "block", fontSize: 9, mt: 0.25 }}>
                         © 2026 i7AI Sistemas Inteligentes. Tecnologia para fortalecer a gestão pública.
                       </Typography>
                     </Box>
@@ -499,5 +536,13 @@ export default function LoginPage() {
         </Grid>
       </Container>
     </Box>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginContent />
+    </Suspense>
   );
 }
