@@ -1,5 +1,5 @@
 import { prisma } from "@i7ai/database";
-import { decryptSecret, encryptSecret } from "@i7ai/security";
+import { decryptSecret, encryptSecret, encryptFile, decryptFile } from "@i7ai/security";
 import { GoogleDriveStorageProvider } from "@i7ai/storage";
 import { testSshConnection, addBackupJob, sendBackupNotification, applyRetentionPolicy } from "@i7ai/backup-core";
 import { Worker, Job } from "bullmq";
@@ -106,8 +106,16 @@ const backupWorker = new Worker(
         }
         writeStream.end();
 
+        let restoreFilePath = localTempFilePath;
+        const meta = await drive.getMetadata(remoteFileId);
+        if (meta.name.endsWith(".enc")) {
+          await log("INFO", "Arquivo de backup criptografado (.enc) detectado. Descriptografando com AES-256...");
+          restoreFilePath = path.join(tmpDir, `backup-decrypted-${runId}.sql.gz`);
+          await decryptFile(localTempFilePath, restoreFilePath);
+        }
+
         await updateProgress(50, "Executando Comando de Restauração", "RUNNING");
-        await log("INFO", "Download concluído. Executando processo de restauração...");
+        await log("INFO", "Download e descriptografia concluídos. Executando processo de restauração...");
 
         let restoreCmd = "";
         if (source.type === "MYSQL") {
@@ -118,9 +126,9 @@ const backupWorker = new Worker(
           const passArg = dbPassword ? `-p"${dbPassword}"` : "";
 
           if (dockerName) {
-            restoreCmd = `docker exec -i ${dockerName} mysql -u${dbUser} ${passArg} ${dbName} < "${localTempFilePath}"`;
+            restoreCmd = `docker exec -i ${dockerName} mysql -u${dbUser} ${passArg} ${dbName} < "${restoreFilePath}"`;
           } else {
-            restoreCmd = `mysql -u${dbUser} ${passArg} ${dbName} < "${localTempFilePath}"`;
+            restoreCmd = `mysql -u${dbUser} ${passArg} ${dbName} < "${restoreFilePath}"`;
           }
         } else if (source.type === "POSTGRESQL") {
           const dbUser = config.dbUser || "postgres";
@@ -130,13 +138,13 @@ const backupWorker = new Worker(
           const passEnv = dbPassword ? `PGPASSWORD="${dbPassword}" ` : "";
 
           if (dockerName) {
-            restoreCmd = `${passEnv}docker exec -i -e PGPASSWORD="${dbPassword}" ${dockerName} psql -U${dbUser} -d${dbName} < "${localTempFilePath}"`;
+            restoreCmd = `${passEnv}docker exec -i -e PGPASSWORD="${dbPassword}" ${dockerName} psql -U${dbUser} -d${dbName} < "${restoreFilePath}"`;
           } else {
-            restoreCmd = `${passEnv}psql -U${dbUser} -d${dbName} < "${localTempFilePath}"`;
+            restoreCmd = `${passEnv}psql -U${dbUser} -d${dbName} < "${restoreFilePath}"`;
           }
         } else if (source.type === "DIRECTORY") {
           const targetPath = config.path || "./";
-          restoreCmd = `tar -xzf "${localTempFilePath}" -C "${targetPath}"`;
+          restoreCmd = `tar -xzf "${restoreFilePath}" -C "${targetPath}"`;
         }
 
         if (restoreCmd) {
@@ -349,12 +357,17 @@ const backupWorker = new Worker(
 
       await log("INFO", "Dump concluído com sucesso.");
 
-      // 3. Compactação e Checksum (Passos do progresso)
-      await updateProgress(45, "Calculando Checksum", "CHECKSUM");
+      // 3. Criptografia AES-256 e Checksum
+      await updateProgress(40, "Criptografando Arquivo (AES-256)", "COMPRESSING");
+      const encryptedTempFilePath = `${localTempFilePath}.enc`;
+      await log("INFO", "Criptografando arquivo de backup em repouso com AES-256-CBC...");
+      await encryptFile(localTempFilePath, encryptedTempFilePath);
+
+      await updateProgress(50, "Calculando Checksum", "CHECKSUM");
       const hash = createHash("sha256");
       const fileData = await new Promise<Buffer>((resolve, reject) => {
         const chunks: Buffer[] = [];
-        const readStream = createReadStream(localTempFilePath);
+        const readStream = createReadStream(encryptedTempFilePath);
         readStream.on("data", (chunk: any) => {
           hash.update(chunk);
           chunks.push(chunk);
@@ -365,10 +378,10 @@ const backupWorker = new Worker(
       const checksumSha256 = hash.digest("hex");
       const fileSize = fileData.length;
 
-      await log("INFO", `Checksum SHA-256 gerado: ${checksumSha256} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`);
+      await log("INFO", `Checksum SHA-256 gerado (arquivo criptografado): ${checksumSha256} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`);
 
       // 4. Carregar conexão Google Drive e fazer upload
-      await updateProgress(60, "Fazendo upload para o Google Drive", "UPLOADING");
+      await updateProgress(65, "Fazendo upload para o Google Drive", "UPLOADING");
       await log("INFO", "Buscando credenciais de armazenamento Google Drive...");
 
       const connection = await prisma.storageConnection.findFirst({
@@ -425,16 +438,16 @@ const backupWorker = new Worker(
 
       // Fazer upload real utilizando GoogleDriveStorageProvider
       const drive = new GoogleDriveStorageProvider(accessToken);
-      const filename = `${source.name.toLowerCase().replace(/\s+/g, "-")}-${new Date().toISOString().split("T")[0]}-${Date.now()}.sql.gz`;
+      const filename = `${source.name.toLowerCase().replace(/\s+/g, "-")}-${new Date().toISOString().split("T")[0]}-${Date.now()}.sql.gz.enc`;
       
-      await log("INFO", `Iniciando upload de ${filename} para o Google Drive...`);
-      const readableStream = createReadStream(localTempFilePath);
+      await log("INFO", `Iniciando upload do backup criptografado (${filename}) para o Google Drive...`);
+      const readableStream = createReadStream(encryptedTempFilePath);
       
       const stored = await drive.upload(
         readableStream,
         filename,
         connection.googleDrive.rootFolderId || undefined,
-        "application/gzip"
+        "application/octet-stream"
       );
 
       await log("INFO", `Upload concluído. Google Drive File ID: ${stored.id}`);
@@ -518,14 +531,18 @@ const backupWorker = new Worker(
 
       throw err;
     } finally {
-      // Remover arquivo temporário local do worker
-      try {
-        if (existsSync(localTempFilePath)) {
-          unlinkSync(localTempFilePath);
-          console.log(`[Run ${runId}] Arquivo temporário local excluído.`);
+      // Remover arquivos temporários locais do worker
+      const encPath = `${localTempFilePath}.enc`;
+      const decPath = path.join(tmpDir, `backup-decrypted-${runId}.sql.gz`);
+      for (const f of [localTempFilePath, encPath, decPath]) {
+        try {
+          if (existsSync(f)) {
+            unlinkSync(f);
+            console.log(`[Run ${runId}] Arquivo temporário excluído: ${path.basename(f)}`);
+          }
+        } catch (errUnlink) {
+          console.error(`Erro ao deletar arquivo temporário ${f}:`, errUnlink);
         }
-      } catch (errUnlink) {
-        console.error("Erro ao deletar arquivo temporário:", errUnlink);
       }
     }
   },

@@ -48,6 +48,8 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
     networks: ["internal"]
     restart: unless-stopped
 volumes:

@@ -119,3 +119,28 @@ export function decryptSecret(value: string): string {
     decipher.final(),
   ]).toString("utf8");
 }
+
+import { createReadStream, createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
+
+export async function encryptFile(inputPath: string, outputPath: string): Promise<void> {
+  const iv = randomBytes(16);
+  const cipher = createCipheriv("aes-256-cbc", encryptionKey(), iv);
+  const readStream = createReadStream(inputPath);
+  const writeStream = createWriteStream(outputPath);
+  writeStream.write(iv);
+  await pipeline(readStream, cipher, writeStream);
+}
+
+export async function decryptFile(inputPath: string, outputPath: string): Promise<void> {
+  const readStream = createReadStream(inputPath, { start: 0, end: 15 });
+  const ivChunks: Buffer[] = [];
+  for await (const chunk of readStream) {
+    ivChunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+  }
+  const iv = Buffer.concat(ivChunks);
+  const decipher = createDecipheriv("aes-256-cbc", encryptionKey(), iv);
+  const fileReadStream = createReadStream(inputPath, { start: 16 });
+  const writeStream = createWriteStream(outputPath);
+  await pipeline(fileReadStream, decipher, writeStream);
+}
