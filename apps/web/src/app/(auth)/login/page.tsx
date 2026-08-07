@@ -98,9 +98,11 @@ export default function LoginPage() {
                   src="/i7ai-logo.png"
                   alt="I7AI Sistemas Inteligentes"
                   sx={{
-                    width: 140,
+                    width: 230,
                     height: "auto",
                     display: "block",
+                    transform: "scale(1.25)",
+                    transformOrigin: "left center",
                     filter: "drop-shadow(0 0 20px rgba(99, 102, 241, 0.4))",
                   }}
                 />
