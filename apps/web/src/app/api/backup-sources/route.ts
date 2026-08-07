@@ -12,6 +12,39 @@ const createSourceSchema = z.object({
   sectorId: z.string().uuid("Secretaria é obrigatória"),
   serverId: z.string().uuid().nullable().optional(),
   config: z.record(z.string(), z.any()),
+}).superRefine((data, ctx) => {
+  const { type, config } = data;
+  if (type === "MYSQL" || type === "POSTGRESQL") {
+    if (!config.host || typeof config.host !== "string" || config.host.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Host do banco de dados é obrigatório.",
+        path: ["config", "host"],
+      });
+    }
+    const portNum = Number(config.port);
+    if (!config.port || isNaN(portNum) || portNum <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Porta do banco de dados é obrigatória e deve ser válida.",
+        path: ["config", "port"],
+      });
+    }
+    if (typeof config.dbName !== "string" || config.dbName.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Nome do banco de dados é obrigatório.",
+        path: ["config", "dbName"],
+      });
+    }
+    if (!config.dbUser || typeof config.dbUser !== "string" || config.dbUser.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Usuário do banco de dados é obrigatório.",
+        path: ["config", "dbUser"],
+      });
+    }
+  }
 });
 
 export async function GET() {

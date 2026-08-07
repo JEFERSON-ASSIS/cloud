@@ -69,6 +69,7 @@ const backupWorker = new Worker(
     };
 
     let localTempFilePath = path.join(tmpDir, `backup-${runId}.sql.gz`);
+    let config: Record<string, any> = {};
 
     try {
 
@@ -79,7 +80,6 @@ const backupWorker = new Worker(
         await log("INFO", `Iniciando RESTAURAÇÃO para a origem "${source.name}". Baixando arquivo remoto (File ID: ${remoteFileId})...`);
 
         // Descriptografar config da origem
-        let config: Record<string, any> = {};
         if (source.encryptedConfig && typeof source.encryptedConfig === "object") {
           const { ciphertext } = source.encryptedConfig as { ciphertext?: string };
           if (ciphertext) config = JSON.parse(decryptSecret(ciphertext));
@@ -170,7 +170,6 @@ const backupWorker = new Worker(
       await log("INFO", `Iniciando backup "${source.name}" do tipo ${source.type}`);
 
       // Descriptografar config
-      let config: Record<string, any> = {};
       if (source.encryptedConfig && typeof source.encryptedConfig === "object") {
         const { ciphertext } = source.encryptedConfig as { ciphertext?: string };
         if (ciphertext) {
@@ -186,10 +185,20 @@ const backupWorker = new Worker(
       let remoteSshCmd = "";
 
       if (source.type === "MYSQL") {
-        const dbUser = config.dbUser || "root";
-        const dbPassword = config.dbPassword || "";
-        const dbName = config.dbName || "";
-        const dockerName = config.dockerName || "";
+        if (!config.host || !config.port) {
+          throw new Error("Origem de backup precisa ser atualizada com Host e Porta.");
+        }
+
+        const host = String(config.host).trim();
+        const port = Number(config.port);
+        const dbUser = String(config.dbUser || "").trim();
+        const dbPassword = String(config.dbPassword || "");
+        const dbName = String(config.dbName || ""); // NUNCA EXECUTAR TRIM() EM DBNAME PARA PRESERVAR BANCOS LEGADOS
+        const dockerName = String(config.dockerName || "").trim();
+
+        if (dbPassword) {
+          extraEnv.MYSQL_PWD = dbPassword;
+        }
 
         if (dockerName) {
           await log("INFO", `Executando mysqldump via Docker no contêiner: ${dockerName}`);
@@ -197,40 +206,59 @@ const backupWorker = new Worker(
           execArgs = [
             "exec",
             "-i",
+            ...(dbPassword ? ["-e", `MYSQL_PWD=${dbPassword}`] : []),
             dockerName,
             "mysqldump",
-            `-u${dbUser}`,
-            ...(dbPassword ? [`-p${dbPassword}`] : []),
-            dbName,
+            "-h",
+            host,
+            "-P",
+            String(port),
+            "-u",
+            dbUser,
             "--single-transaction",
             "--quick",
             "--routines",
             "--triggers",
             "--events",
             "--hex-blob",
+            "--default-character-set=utf8mb4",
+            dbName,
           ];
         } else {
           execCommand = "mysqldump";
           execArgs = [
-            `-u${dbUser}`,
-            ...(dbPassword ? [`-p${dbPassword}`] : []),
-            dbName,
+            "-h",
+            host,
+            "-P",
+            String(port),
+            "-u",
+            dbUser,
             "--single-transaction",
             "--quick",
             "--routines",
             "--triggers",
             "--events",
             "--hex-blob",
+            "--default-character-set=utf8mb4",
+            dbName,
           ];
         }
-        remoteSshCmd = `mysqldump -u${dbUser} ${dbPassword ? `-p"${dbPassword}"` : ""} ${dbName} --single-transaction --quick --routines --triggers --events --hex-blob | gzip`;
+        remoteSshCmd = `MYSQL_PWD="${dbPassword.replace(/"/g, '\\"')}" mysqldump -h "${host}" -P ${port} -u "${dbUser}" "${dbName}" --single-transaction --quick --routines --triggers --events --hex-blob --default-character-set=utf8mb4 | gzip`;
       } else if (source.type === "POSTGRESQL") {
-        const dbUser = config.dbUser || "postgres";
-        const dbPassword = config.dbPassword || "";
-        const dbName = config.dbName || "";
-        const dockerName = config.dockerName || "";
+        if (!config.host || !config.port) {
+          throw new Error("Origem de backup precisa ser atualizada com Host e Porta.");
+        }
 
-        if (dbPassword) extraEnv.PGPASSWORD = dbPassword;
+        const host = String(config.host).trim();
+        const port = Number(config.port);
+        const dbUser = String(config.dbUser || "").trim();
+        const dbPassword = String(config.dbPassword || "");
+        const dbName = String(config.dbName || ""); // NUNCA EXECUTAR TRIM() EM DBNAME PARA PRESERVAR BANCOS LEGADOS
+        const dockerName = String(config.dockerName || "").trim();
+
+        if (dbPassword) {
+          extraEnv.PGPASSWORD = dbPassword;
+        }
 
         if (dockerName) {
           await log("INFO", `Executando pg_dump via Docker no contêiner: ${dockerName}`);
@@ -241,15 +269,31 @@ const backupWorker = new Worker(
             ...(dbPassword ? ["-e", `PGPASSWORD=${dbPassword}`] : []),
             dockerName,
             "pg_dump",
-            `-U${dbUser}`,
-            `-d${dbName}`,
+            "-h",
+            host,
+            "-p",
+            String(port),
+            "-U",
+            dbUser,
+            "-d",
+            dbName,
             "-Fp",
           ];
         } else {
           execCommand = "pg_dump";
-          execArgs = [`-U${dbUser}`, `-d${dbName}`, "-Fp"];
+          execArgs = [
+            "-h",
+            host,
+            "-p",
+            String(port),
+            "-U",
+            dbUser,
+            "-d",
+            dbName,
+            "-Fp",
+          ];
         }
-        remoteSshCmd = `${dbPassword ? `PGPASSWORD="${dbPassword}" ` : ""}pg_dump -U${dbUser} -d${dbName} -Fp | gzip`;
+        remoteSshCmd = `PGPASSWORD="${dbPassword.replace(/"/g, '\\"')}" pg_dump -h "${host}" -p ${port} -U "${dbUser}" -d "${dbName}" -Fp | gzip`;
       } else if (source.type === "DIRECTORY") {
         const targetPath = config.path || "";
         if (!targetPath) throw new Error("Caminho do diretório não configurado.");
@@ -269,6 +313,12 @@ const backupWorker = new Worker(
       }
 
       await updateProgress(20, "Executando Backup", "RUNNING");
+
+      const rawPassword = String(config.dbPassword || "");
+      const sanitizeText = (txt: string) => {
+        if (!rawPassword) return txt;
+        return txt.replaceAll(rawPassword, "[PASSWORD_REDACTED]");
+      };
 
       // 2. Executar local ou remotamente via SSH
       if (source.server) {
@@ -315,7 +365,7 @@ const backupWorker = new Worker(
               }
             });
             stream.stderr.on("data", (data) => {
-              const msg = data.toString().trim();
+              const msg = sanitizeText(data.toString().trim());
               if (msg) void log("WARNING", `[stderr] ${msg}`);
             });
             stream.pipe(writeStream);
@@ -323,7 +373,8 @@ const backupWorker = new Worker(
         });
       } else {
         // Executar localmente via execFile seguro (sem passar pela shell)
-        await log("INFO", `Executando dump local seguro: ${execCommand} ${execArgs.join(" ")}`);
+        const safeArgs = execArgs.map((arg) => (rawPassword && arg.includes(rawPassword) ? "[PASSWORD_REDACTED]" : arg));
+        await log("INFO", `Executando dump local seguro: ${execCommand} ${safeArgs.join(" ")}`);
         const writeStream = createWriteStream(localTempFilePath);
 
         await new Promise<void>((resolve, reject) => {
@@ -333,13 +384,13 @@ const backupWorker = new Worker(
             { env: { ...process.env, ...extraEnv } },
             (err) => {
               if (err && err.code !== 0) {
-                reject(new Error(`Comando "${execCommand}" falhou com código ${err.code ?? 1}: ${err.message}`));
+                reject(new Error(sanitizeText(`Comando "${execCommand}" falhou com código ${err.code ?? 1}: ${err.message}`)));
               }
             }
           );
 
           child.stderr?.on("data", (data) => {
-            const msg = data.toString().trim();
+            const msg = sanitizeText(data.toString().trim());
             if (msg) void log("WARNING", `[stderr] ${msg}`);
           });
 
@@ -351,7 +402,7 @@ const backupWorker = new Worker(
           }
 
           writeStream.on("finish", () => resolve());
-          writeStream.on("error", (err) => reject(err));
+          writeStream.on("error", (err) => reject(new Error(sanitizeText(err.message))));
         });
       }
 
@@ -547,7 +598,9 @@ const backupWorker = new Worker(
       }
 
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : "Erro desconhecido durante a execução.";
+      const rawErrMsg = err instanceof Error ? err.message : "Erro desconhecido durante a execução.";
+      const rawSecretPassword = String(config.dbPassword || "");
+      const errMsg = rawSecretPassword ? rawErrMsg.replaceAll(rawSecretPassword, "[PASSWORD_REDACTED]") : rawErrMsg;
       await log("ERROR", `Falha no processamento: ${errMsg}`);
       await prisma.backupRun.update({
         where: { id: runId },

@@ -98,6 +98,8 @@ export default function BackupsPage() {
   const [serverId, setServerId] = useState<string>("");
   
   // Configs
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState<number | string>(3306);
   const [dbName, setDbName] = useState("");
   const [dbUser, setDbUser] = useState("");
   const [dbPassword, setDbPassword] = useState("");
@@ -166,10 +168,23 @@ export default function BackupsPage() {
     return () => clearInterval(interval);
   }, [pollingRunId, selectedRun]);
 
+  const handleTypeChange = (newType: "MYSQL" | "POSTGRESQL" | "DOCKER_VOLUME" | "DIRECTORY") => {
+    setType(newType);
+    if (newType === "MYSQL") {
+      if (!host) setHost("mysql");
+      setPort(3306);
+    } else if (newType === "POSTGRESQL") {
+      if (!host) setHost("postgres");
+      setPort(5432);
+    }
+  };
+
   const handleOpenCreate = () => {
     setEditingSource(null);
     setName("");
     setType("MYSQL");
+    setHost("mysql");
+    setPort(3306);
     if (sectors.length > 0 && sectors[0]) setSectorId(sectors[0].id);
     setServerId("");
     setDbName("");
@@ -195,6 +210,8 @@ export default function BackupsPage() {
         setServerId(data.serverId || "");
         
         const conf = data.config || {};
+        setHost(conf.host || (data.type === "POSTGRESQL" ? "postgres" : "mysql"));
+        setPort(conf.port || (data.type === "POSTGRESQL" ? 5432 : 3306));
         setDbName(conf.dbName || "");
         setDbUser(conf.dbUser || "");
         setDbPassword(conf.dbPassword || "");
@@ -219,10 +236,12 @@ export default function BackupsPage() {
     try {
       const config: Record<string, unknown> = {};
       if (type === "MYSQL" || type === "POSTGRESQL") {
+        config.host = host;
+        config.port = Number(port);
         config.dbName = dbName;
         config.dbUser = dbUser;
         if (dbPassword) config.dbPassword = dbPassword;
-        config.dockerName = dockerName;
+        if (dockerName) config.dockerName = dockerName;
       } else if (type === "DIRECTORY") {
         config.path = path;
       } else if (type === "DOCKER_VOLUME") {
@@ -526,7 +545,7 @@ export default function BackupsPage() {
               <Select
                 fullWidth
                 value={type}
-                onChange={(e) => setType(e.target.value as "MYSQL" | "POSTGRESQL" | "DOCKER_VOLUME" | "DIRECTORY")}
+                onChange={(e) => handleTypeChange(e.target.value as "MYSQL" | "POSTGRESQL" | "DOCKER_VOLUME" | "DIRECTORY")}
                 disabled={!!editingSource}
               >
                 <MenuItem value="MYSQL">MySQL Database</MenuItem>
@@ -556,6 +575,29 @@ export default function BackupsPage() {
             {/* Configs baseadas em tipo */}
             {(type === "MYSQL" || type === "POSTGRESQL") && (
               <>
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 8 }}>
+                    <TextField
+                      label="Host *"
+                      fullWidth
+                      value={host}
+                      onChange={(e) => setHost(e.target.value)}
+                      placeholder={type === "MYSQL" ? "mysql" : "postgres"}
+                      helperText="Hostname ou DNS acessível pelo Worker. Ex.: mysql, postgres, postgres_psf."
+                      required
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 4 }}>
+                    <TextField
+                      label="Porta *"
+                      type="number"
+                      fullWidth
+                      value={port}
+                      onChange={(e) => setPort(e.target.value)}
+                      required
+                    />
+                  </Grid>
+                </Grid>
                 <TextField
                   label="Nome do Banco de Dados"
                   fullWidth

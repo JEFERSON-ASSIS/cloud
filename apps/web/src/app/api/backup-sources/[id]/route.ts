@@ -12,6 +12,38 @@ const updateSourceSchema = z.object({
   serverId: z.string().uuid().nullable().optional(),
   active: z.boolean().optional(),
   config: z.record(z.string(), z.any()).optional(),
+}).superRefine((data, ctx) => {
+  if (data.config) {
+    const config = data.config;
+    if (config.host !== undefined && (typeof config.host !== "string" || config.host.trim().length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Host do banco de dados não pode ser vazio.",
+        path: ["config", "host"],
+      });
+    }
+    if (config.port !== undefined && (isNaN(Number(config.port)) || Number(config.port) <= 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Porta do banco de dados deve ser válida.",
+        path: ["config", "port"],
+      });
+    }
+    if (config.dbName !== undefined && (typeof config.dbName !== "string" || config.dbName.trim().length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Nome do banco de dados não pode ser vazio.",
+        path: ["config", "dbName"],
+      });
+    }
+    if (config.dbUser !== undefined && (typeof config.dbUser !== "string" || config.dbUser.trim().length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Usuário do banco de dados não pode ser vazio.",
+        path: ["config", "dbUser"],
+      });
+    }
+  }
 });
 
 type Params = Promise<{ id: string }>;
