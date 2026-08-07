@@ -1,5 +1,7 @@
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
+import { decryptSecret } from "@/server/encryption";
+import { GoogleDriveStorageProvider } from "@i7ai/storage";
 
 export async function PATCH(
   request: Request,
@@ -95,6 +97,28 @@ export async function DELETE(
     await prisma.sector.findFirstOrThrow({
       where: { id, organizationId, deletedAt: null },
     });
+
+    // Tentar excluir a pasta da secretaria no Google Drive para nao deixar lixo
+    try {
+      const storageSpace = await prisma.storageSpace.findFirst({
+        where: { organizationId, sectorId: id, deletedAt: null },
+      });
+
+      if (storageSpace?.rootFolderId) {
+        const connection = await prisma.storageConnection.findFirst({
+          where: { organizationId, provider: "GOOGLE_DRIVE", status: "CONNECTED", deletedAt: null },
+          include: { googleDrive: true },
+        });
+
+        if (connection?.googleDrive) {
+          const accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
+          const drive = new GoogleDriveStorageProvider(accessToken);
+          await drive.delete(storageSpace.rootFolderId);
+        }
+      }
+    } catch (errDrive) {
+      console.warn("Aviso: Não foi possível deletar a pasta da secretaria no Google Drive:", errDrive);
+    }
 
     // Soft delete
     const deleted = await prisma.sector.update({

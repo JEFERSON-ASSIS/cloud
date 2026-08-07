@@ -1,5 +1,7 @@
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
+import { decryptSecret } from "@/server/encryption";
+import { GoogleDriveStorageProvider } from "@i7ai/storage";
 
 export async function PATCH(
   req: Request,
@@ -61,9 +63,38 @@ export async function DELETE(
       return Response.json({ error: "Apenas Super Admins podem excluir empresas/prefeituras." }, { status: 403 });
     }
 
+    const org = await prisma.organization.findUniqueOrThrow({ where: { id } });
+
+    // Tentar deletar a pasta inteira da Empresa no Google Drive para nao deixar lixo
+    try {
+      const connection = await prisma.storageConnection.findFirst({
+        where: { organizationId: id, provider: "GOOGLE_DRIVE", status: "CONNECTED", deletedAt: null },
+        include: { googleDrive: true },
+      });
+
+      if (connection?.googleDrive) {
+        const accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
+        const drive = new GoogleDriveStorageProvider(accessToken);
+        let orgFolderId = connection.googleDrive.rootFolderId || undefined;
+        if (!orgFolderId) {
+          const rootItems = await drive.list("root");
+          orgFolderId = rootItems.find((i) => i.name === org.name)?.id;
+        }
+        if (orgFolderId) {
+          await drive.delete(orgFolderId);
+        }
+      }
+    } catch (errDrive) {
+      console.warn("Aviso: Não foi possível deletar a pasta da empresa no Google Drive:", errDrive);
+    }
+
+    // Atualizar slug para liberar o nome original imediatamente e marcar como deletada
     await prisma.organization.update({
       where: { id },
-      data: { deletedAt: new Date() },
+      data: {
+        slug: `${org.slug}-deleted-${Date.now()}`,
+        deletedAt: new Date(),
+      },
     });
 
     return Response.json({ success: true });
