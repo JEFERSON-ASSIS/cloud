@@ -438,7 +438,7 @@ export default function BackupsPage() {
         /* Histórico de Execuções */
         <Grid container spacing={2}>
           {runs.map((run) => {
-            const date = new Date(run.startedAt).toLocaleString("pt-BR", { timeZone: "America/Cuiaba" });
+            const date = run.startedAt ? new Date(run.startedAt).toLocaleString("pt-BR", { timeZone: "America/Cuiaba" }) : "Data N/A";
             const isFinished = run.status === "COMPLETED" || run.status === "FAILED";
             return (
               <Grid size={{ xs: 12 }} key={run.id}>
@@ -455,7 +455,7 @@ export default function BackupsPage() {
                         )}
                         <Box>
                           <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                            {run.source.name} ({run.source.type})
+                            {run.source?.name || "Origem Removida"} ({run.source?.type || "N/A"})
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
                             Iniciado em: {date}
@@ -578,7 +578,7 @@ export default function BackupsPage() {
                 <Grid container spacing={2}>
                   <Grid size={{ xs: 8 }}>
                     <TextField
-                      label="Host *"
+                      label="Host"
                       fullWidth
                       value={host}
                       onChange={(e) => setHost(e.target.value)}
@@ -589,7 +589,7 @@ export default function BackupsPage() {
                   </Grid>
                   <Grid size={{ xs: 4 }}>
                     <TextField
-                      label="Porta *"
+                      label="Porta"
                       type="number"
                       fullWidth
                       value={port}
