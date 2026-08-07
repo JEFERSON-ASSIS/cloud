@@ -145,8 +145,9 @@ export function AppShell({ children }: PropsWithChildren) {
   }, [data?.user?.organizationId]);
 
   useEffect(() => {
-    if (data?.user?.organizationId) {
-      fetch("/api/sectors")
+    const orgId = activeOrgId || data?.user?.organizationId;
+    if (orgId) {
+      fetch(`/api/sectors?organizationId=${orgId}`)
         .then((res) => res.json())
         .then((list) => {
           if (Array.isArray(list)) {
@@ -156,12 +157,20 @@ export function AppShell({ children }: PropsWithChildren) {
             if (found) {
               setActiveSectorId(found.id);
               localStorage.setItem("active-sector-id", found.id);
+            } else {
+              setActiveSectorId("");
             }
           }
         })
         .catch(() => {});
     }
-  }, [data?.user?.organizationId]);
+  }, [activeOrgId, data?.user?.organizationId]);
+
+  const handleOrgChange = (id: string) => {
+    setActiveOrgId(id);
+    localStorage.setItem("active-org-id", id);
+    window.dispatchEvent(new Event("active-org-changed"));
+  };
 
   const handleSectorChange = (id: string) => {
     setActiveSectorId(id);
@@ -382,7 +391,7 @@ export function AppShell({ children }: PropsWithChildren) {
             <Select
               size="small"
               value={activeOrgId || data?.user.organizationId || ""}
-              onChange={(e) => setActiveOrgId(String(e.target.value))}
+              onChange={(e) => handleOrgChange(String(e.target.value))}
               displayEmpty
               sx={{ display: { xs: "none", md: "flex" }, minWidth: 180 }}
             >
