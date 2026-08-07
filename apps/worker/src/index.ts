@@ -126,25 +126,32 @@ const backupWorker = new Worker(
         let localRestoreCmd = "";
         let remoteRestoreCmd = "";
         if (source.type === "MYSQL") {
+          const dbHost = String(config.host || "127.0.0.1").trim() || "127.0.0.1";
+          const dbPort = String(config.port || 3306);
           const dbUser = config.dbUser || "root";
           const dbPassword = config.dbPassword || "";
           const dbName = config.dbName || "";
           const env = dbPassword ? `MYSQL_PWD=${shellQuote(dbPassword)} ` : "";
+          // Sempre usar TCP (host/porta da origem). Sem -h o cliente tenta socket local do worker e falha.
+          const mysqlArgs = `-h ${shellQuote(dbHost)} -P ${shellQuote(dbPort)} -u ${shellQuote(dbUser)} ${shellQuote(dbName)}`;
           if (dockerName) {
-            remoteRestoreCmd = `gzip -dc | docker exec -i -e MYSQL_PWD=${shellQuote(dbPassword)} ${shellQuote(dockerName)} mysql -u ${shellQuote(dbUser)} ${shellQuote(dbName)}`;
+            remoteRestoreCmd = `gzip -dc | docker exec -i -e MYSQL_PWD=${shellQuote(dbPassword)} ${shellQuote(dockerName)} mysql ${mysqlArgs}`;
           } else {
-            remoteRestoreCmd = `gzip -dc | ${env}mysql -u ${shellQuote(dbUser)} ${shellQuote(dbName)}`;
+            remoteRestoreCmd = `gzip -dc | ${env}mysql ${mysqlArgs}`;
           }
           localRestoreCmd = remoteRestoreCmd.replace("gzip -dc", `gzip -dc ${shellQuote(restoreFilePath)}`);
         } else if (source.type === "POSTGRESQL") {
+          const dbHost = String(config.host || "127.0.0.1").trim() || "127.0.0.1";
+          const dbPort = String(config.port || 5432);
           const dbUser = config.dbUser || "postgres";
           const dbPassword = config.dbPassword || "";
           const dbName = config.dbName || "";
           const passEnv = dbPassword ? `PGPASSWORD=${shellQuote(dbPassword)} ` : "";
+          const psqlArgs = `-h ${shellQuote(dbHost)} -p ${shellQuote(dbPort)} -U ${shellQuote(dbUser)} -d ${shellQuote(dbName)}`;
           if (dockerName) {
-            remoteRestoreCmd = `gzip -dc | docker exec -i -e PGPASSWORD=${shellQuote(dbPassword)} ${shellQuote(dockerName)} psql -U ${shellQuote(dbUser)} -d ${shellQuote(dbName)}`;
+            remoteRestoreCmd = `gzip -dc | docker exec -i -e PGPASSWORD=${shellQuote(dbPassword)} ${shellQuote(dockerName)} psql ${psqlArgs}`;
           } else {
-            remoteRestoreCmd = `gzip -dc | ${passEnv}psql -U ${shellQuote(dbUser)} -d ${shellQuote(dbName)}`;
+            remoteRestoreCmd = `gzip -dc | ${passEnv}psql ${psqlArgs}`;
           }
           localRestoreCmd = remoteRestoreCmd.replace("gzip -dc", `gzip -dc ${shellQuote(restoreFilePath)}`);
         } else if (source.type === "DIRECTORY") {
