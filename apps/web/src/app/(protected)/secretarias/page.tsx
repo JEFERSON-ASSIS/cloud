@@ -353,7 +353,7 @@ export default function SecretariasPage() {
                   {stat.icon}
                 </Avatar>
                 <Box>
-                  <Typography variant="h6" fontWeight={700} sx={{ lineHeight: 1 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1 }}>
                     {stat.value}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
@@ -401,7 +401,7 @@ export default function SecretariasPage() {
           >
             <AccountTree sx={{ fontSize: 36, color: "primary.main" }} />
           </Box>
-          <Typography variant="h6" fontWeight={700} gutterBottom>
+          <Typography variant="h6" gutterBottom sx={{ fontWeight: 700 }}>
             Nenhuma secretaria cadastrada
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3, maxWidth: 360, mx: "auto" }}>
@@ -477,8 +477,7 @@ export default function SecretariasPage() {
                     </Stack>
                     <Typography
                       variant="h6"
-                      fontWeight={800}
-                      sx={{ color: "white", mt: 1.5, textShadow: "0 1px 3px rgba(0,0,0,0.2)" }}
+                      sx={{ fontWeight: 800, color: "white", mt: 1.5, textShadow: "0 1px 3px rgba(0,0,0,0.2)" }}
                       noWrap
                       title={sector.name}
                     >
@@ -493,7 +492,7 @@ export default function SecretariasPage() {
                       <Typography variant="caption" color="text.secondary" sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
                         <Storage sx={{ fontSize: 12 }} /> Cota alocada
                       </Typography>
-                      <Typography variant="caption" fontWeight={700} color="primary">
+                      <Typography variant="caption" color="primary" sx={{ fontWeight: 700 }}>
                         {formatBytes(quotaBytes)}
                       </Typography>
                     </Stack>
@@ -520,7 +519,7 @@ export default function SecretariasPage() {
                       }}
                     >
                       <Stack spacing={0.25} sx={{ alignItems: "center" }}>
-                        <Typography variant="h6" fontWeight={800} sx={{ lineHeight: 1 }}>
+                        <Typography variant="h6" sx={{ fontWeight: 800, lineHeight: 1 }}>
                           {sector._count.documents}
                         </Typography>
                         <Typography variant="caption" color="text.secondary" sx={{ display: "flex", alignItems: "center", gap: 0.25 }}>
@@ -529,7 +528,7 @@ export default function SecretariasPage() {
                       </Stack>
                       <Divider orientation="vertical" flexItem />
                       <Stack spacing={0.25} sx={{ alignItems: "center" }}>
-                        <Typography variant="h6" fontWeight={800} sx={{ lineHeight: 1 }}>
+                        <Typography variant="h6" sx={{ fontWeight: 800, lineHeight: 1 }}>
                           {sector._count.users}
                         </Typography>
                         <Typography variant="caption" color="text.secondary" sx={{ display: "flex", alignItems: "center", gap: 0.25 }}>
@@ -538,7 +537,7 @@ export default function SecretariasPage() {
                       </Stack>
                       <Divider orientation="vertical" flexItem />
                       <Stack spacing={0.25} sx={{ alignItems: "center" }}>
-                        <Typography variant="h6" fontWeight={800} sx={{ lineHeight: 1 }}>
+                        <Typography variant="h6" sx={{ fontWeight: 800, lineHeight: 1 }}>
                           {sector._count.storageSpaces}
                         </Typography>
                         <Typography variant="caption" color="text.secondary" sx={{ display: "flex", alignItems: "center", gap: 0.25 }}>
@@ -602,12 +601,12 @@ export default function SecretariasPage() {
         onClose={() => setSectorDialog(false)}
         fullWidth
         maxWidth="xs"
-        PaperProps={{ sx: { borderRadius: 3 } }}
+        slotProps={{ paper: { sx: { borderRadius: 3 } } }}
       >
         <DialogTitle sx={{ pb: 1 }}>
           <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>
             <Box>
-              <Typography variant="h6" fontWeight={700}>
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>
                 {editingSector ? "Editar Secretaria" : "Nova Secretaria"}
               </Typography>
               <Typography variant="caption" color="text.secondary">
@@ -633,8 +632,8 @@ export default function SecretariasPage() {
               fullWidth
               value={sectorQuota}
               onChange={(e) => setSectorQuota(Number(e.target.value))}
-              inputProps={{ min: 1 }}
               slotProps={{
+                htmlInput: { min: 1 },
                 input: { endAdornment: <InputAdornment position="end">GB</InputAdornment> }
               }}
               helperText={sectorQuota > 0 ? `Equivale a ${formatBytes(sectorQuota * 1073741824)}` : "Informe um valor válido"}
@@ -660,7 +659,7 @@ export default function SecretariasPage() {
         onClose={() => setDeleteDialog(false)}
         maxWidth="xs"
         fullWidth
-        PaperProps={{ sx: { borderRadius: 3 } }}
+        slotProps={{ paper: { sx: { borderRadius: 3 } } }}
       >
         <DialogTitle sx={{ pb: 1 }}>
           <Stack direction="row" sx={{ alignItems: "center", gap: 1.5 }}>
@@ -668,7 +667,7 @@ export default function SecretariasPage() {
               <Delete />
             </Avatar>
             <Box>
-              <Typography variant="h6" fontWeight={700}>Excluir Secretaria</Typography>
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>Excluir Secretaria</Typography>
               <Typography variant="caption" color="text.secondary">Esta ação não pode ser desfeita</Typography>
             </Box>
           </Stack>
@@ -693,7 +692,7 @@ export default function SecretariasPage() {
         onClose={() => setMemberDialog(false)}
         fullWidth
         maxWidth="md"
-        PaperProps={{ sx: { borderRadius: 3 } }}
+        slotProps={{ paper: { sx: { borderRadius: 3 } } }}
       >
         <DialogTitle sx={{ pb: 1.5, borderBottom: "1px solid", borderColor: "divider" }}>
           <Stack direction="row" sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
@@ -702,7 +701,7 @@ export default function SecretariasPage() {
                 {getInitials(selectedSector?.name ?? "S")}
               </Avatar>
               <Box>
-                <Typography variant="h6" fontWeight={700}>Membros da Secretaria</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>Membros da Secretaria</Typography>
                 <Typography variant="caption" color="text.secondary">{selectedSector?.name}</Typography>
               </Box>
             </Stack>
@@ -713,7 +712,7 @@ export default function SecretariasPage() {
         <DialogContent sx={{ p: 0 }}>
           {/* Add member form */}
           <Box sx={{ p: 3, bgcolor: "action.hover", borderBottom: "1px solid", borderColor: "divider" }}>
-            <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 2, display: "flex", alignItems: "center", gap: 0.75 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 2, display: "flex", alignItems: "center", gap: 0.75 }}>
               <GroupAdd fontSize="small" color="primary" /> Adicionar Membro à Secretaria
             </Typography>
 
@@ -778,7 +777,7 @@ export default function SecretariasPage() {
           {/* Members list */}
           <Box sx={{ p: 3 }}>
             <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", mb: 2 }}>
-              <Typography variant="subtitle2" fontWeight={700} sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 0.75 }}>
                 <People fontSize="small" color="action" /> Membros Atuais
               </Typography>
               {members.length > 0 && (
@@ -791,7 +790,7 @@ export default function SecretariasPage() {
                 {[1, 2, 3].map((i) => (
                   <Stack key={i} direction="row" spacing={2} sx={{ alignItems: "center", p: 1.5, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
                     <Skeleton variant="circular" width={36} height={36} />
-                    <Box flex={1}>
+                    <Box sx={{ flex: 1 }}>
                       <Skeleton width="45%" height={18} />
                       <Skeleton width="65%" height={14} />
                     </Box>
@@ -829,14 +828,14 @@ export default function SecretariasPage() {
                           <Avatar sx={{ width: 40, height: 40, fontSize: 14, fontWeight: 700, bgcolor: isAdmin ? "primary.main" : "grey.400" }}>
                             {getInitials(member.user.name || "?")}
                           </Avatar>
-                          <Box flex={1} minWidth={0}>
+                          <Box sx={{ flex: 1, minWidth: 0 }}>
                             <Stack direction="row" spacing={0.75} sx={{ alignItems: "center" }}>
-                              <Typography variant="body2" fontWeight={600} noWrap>
+                              <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>
                                 {member.user.name}
                               </Typography>
                               {isAdmin && <AdminPanelSettings sx={{ fontSize: 14, color: "primary.main" }} />}
                             </Stack>
-                            <Typography variant="caption" color="text.secondary" noWrap display="block">
+                            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
                               {member.user.email}
                             </Typography>
                           </Box>

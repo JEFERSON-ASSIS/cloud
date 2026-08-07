@@ -354,7 +354,7 @@ export default function FilesPage() {
                     <InsertDriveFile color="action" sx={{ mr: 2 }} />
                   )}
                   <Box sx={{ minWidth: 0, flex: 1 }}>
-                    <Typography noWrap fontWeight={600} sx={{ fontSize: 14 }}>
+                    <Typography noWrap sx={{ fontWeight: 600, fontSize: 14 }}>
                       {item.name}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">

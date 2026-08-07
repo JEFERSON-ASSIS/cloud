@@ -214,7 +214,7 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
             {getInitials(row.name)}
           </Avatar>
           <Box>
-            <Typography variant="body2" fontWeight={600}>{row.name}</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>{row.name}</Typography>
             <Typography variant="caption" color="text.secondary">{row.email}</Typography>
           </Box>
         </Stack>
@@ -305,12 +305,12 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
         onClose={() => setCreateDialogOpen(false)}
         fullWidth
         maxWidth="sm"
-        PaperProps={{ sx: { borderRadius: 3 } }}
+        slotProps={{ paper: { sx: { borderRadius: 3 } } }}
       >
         <DialogTitle sx={{ pb: 1 }}>
           <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>
             <Box>
-              <Typography variant="h6" fontWeight={700}>Cadastrar Novo Usuário</Typography>
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>Cadastrar Novo Usuário</Typography>
               <Typography variant="caption" color="text.secondary">Preencha os dados do novo usuário da empresa</Typography>
             </Box>
             <IconButton size="small" onClick={() => setCreateDialogOpen(false)}><Close fontSize="small" /></IconButton>
@@ -393,12 +393,12 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
         onClose={() => setEditingUser(null)}
         fullWidth
         maxWidth="sm"
-        PaperProps={{ sx: { borderRadius: 3 } }}
+        slotProps={{ paper: { sx: { borderRadius: 3 } } }}
       >
         <DialogTitle sx={{ pb: 1 }}>
           <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>
             <Box>
-              <Typography variant="h6" fontWeight={700}>Editar Usuário</Typography>
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>Editar Usuário</Typography>
               <Typography variant="caption" color="text.secondary">{editingUser?.email}</Typography>
             </Box>
             <IconButton size="small" onClick={() => setEditingUser(null)}><Close fontSize="small" /></IconButton>
@@ -478,7 +478,7 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
         onClose={() => setDeletingUser(null)}
         maxWidth="xs"
         fullWidth
-        PaperProps={{ sx: { borderRadius: 3 } }}
+        slotProps={{ paper: { sx: { borderRadius: 3 } } }}
       >
         <DialogTitle sx={{ pb: 1 }}>
           <Stack direction="row" sx={{ alignItems: "center", gap: 1.5 }}>
@@ -486,7 +486,7 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
               <Delete />
             </Avatar>
             <Box>
-              <Typography variant="h6" fontWeight={700}>Excluir Usuário</Typography>
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>Excluir Usuário</Typography>
               <Typography variant="caption" color="text.secondary">Esta ação não pode ser desfeita</Typography>
             </Box>
           </Stack>

@@ -62,7 +62,7 @@ export function UploadLimitClient() {
             {msg.text}
           </Alert>
         )}
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "center" }}>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ alignItems: { sm: "center" } }}>
           <TextField
             label="Tamanho limite por arquivo"
             type="number"

@@ -175,7 +175,7 @@ export default function FoldersPage() {
                   {stat.icon}
                 </Avatar>
                 <Box>
-                  <Typography variant="subtitle1" fontWeight={700} sx={{ lineHeight: 1 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1 }}>
                     {stat.value}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
@@ -240,7 +240,7 @@ export default function FoldersPage() {
           >
             <Folder sx={{ fontSize: 34, color: "#4285F4" }} />
           </Box>
-          <Typography variant="h6" fontWeight={700} gutterBottom>
+          <Typography variant="h6" gutterBottom sx={{ fontWeight: 700 }}>
             {search ? "Nenhuma pasta encontrada" : "Nenhuma pasta criada"}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3, maxWidth: 340, mx: "auto" }}>
@@ -307,7 +307,7 @@ export default function FoldersPage() {
                       </Box>
                       <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Tooltip title={folder.name} placement="top">
-                          <Typography fontWeight={700} noWrap sx={{ fontSize: 15 }}>
+                          <Typography noWrap sx={{ fontWeight: 700, fontSize: 15 }}>
                             {folder.name}
                           </Typography>
                         </Tooltip>

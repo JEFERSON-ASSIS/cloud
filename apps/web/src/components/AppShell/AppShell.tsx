@@ -111,8 +111,8 @@ export function AppShell({ children }: PropsWithChildren) {
 
   // Filtragem dinâmica de menus por permissão e perfil
   const filteredNavItems = navItems.filter((item) => {
-    if (userRole === "SUPER_ADMIN") return true;
-    if (item.superAdminOnly && userRole !== "SUPER_ADMIN") return false;
+    if ((userRole as any) === "SUPER_ADMIN") return true;
+    if (item.superAdminOnly && (userRole as any) !== "SUPER_ADMIN") return false;
     if (!item.permission) return true;
     return userPermissions.includes(item.permission);
   });
