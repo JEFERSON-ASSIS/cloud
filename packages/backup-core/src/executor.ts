@@ -5,7 +5,7 @@ import path from "node:path";
 const execFileAsync = promisify(execFile);
 
 /** Comandos permitidos pelo executor seguro */
-const ALLOWED_COMMANDS = new Set(["docker", "mysqldump", "pg_dump", "pg_restore", "gzip", "tar", "sha256sum"]);
+const ALLOWED_COMMANDS = new Set(["docker", "mysqldump", "mysql", "pg_dump", "pg_restore", "psql", "gzip", "tar", "sha256sum"]);
 
 export interface ExecutorResult {
   stdout: string;

@@ -3,7 +3,7 @@ import { Readable } from "node:stream";
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
 import { assertFolder, cleanName } from "@/server/documents";
-import { ensureDriveRoot } from "@/server/google-drive";
+import { ensureDriveRoot, ensureSectorDriveFolder } from "@/server/google-drive";
 import { writeAudit } from "@/server/audit";
 import { assertSectorPermission } from "@i7ai/security";
 
@@ -78,14 +78,36 @@ export async function POST(request: Request) {
     });
     const bytes = Buffer.from(await file.arrayBuffer());
     const checksum = createHash("sha256").update(bytes).digest("hex");
-    const { connection, drive, rootFolderId } = await ensureDriveRoot(
-      organization.id,
-      organization.name,
-    );
-    const stored = await drive.upload(
+
+    let driveConnection: any;
+    let driveProvider: any;
+    let targetDriveFolderId: string;
+
+    if (sectorId) {
+      const sectorObj = await prisma.sector.findUnique({ where: { id: sectorId } });
+      const sectorDrive = await ensureSectorDriveFolder(
+        organization.id,
+        organization.name,
+        sectorId,
+        sectorObj?.name ?? "Secretaria",
+      );
+      driveConnection = sectorDrive.connection;
+      driveProvider = sectorDrive.drive;
+      targetDriveFolderId = parent?.storageFolderId ?? sectorDrive.sectorFolderId;
+    } else {
+      const orgDrive = await ensureDriveRoot(
+        organization.id,
+        organization.name,
+      );
+      driveConnection = orgDrive.connection;
+      driveProvider = orgDrive.drive;
+      targetDriveFolderId = parent?.storageFolderId ?? orgDrive.rootFolderId;
+    }
+
+    const stored = await driveProvider.upload(
       Readable.from(bytes),
       name,
-      parent?.storageFolderId ?? rootFolderId,
+      targetDriveFolderId,
       file.type || "application/octet-stream",
     );
     remoteFileId = stored.id;
@@ -99,7 +121,7 @@ export async function POST(request: Request) {
         sectorId,
         storageSpaceId,
         uploadedById: tenant.userId,
-        storageConnectionId: connection.id,
+        storageConnectionId: driveConnection.id,
         storageFileId: stored.id,
         name,
         originalName: file.name,

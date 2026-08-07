@@ -7,7 +7,8 @@ import { Client } from "ssh2";
 import { createHash } from "node:crypto";
 import { createWriteStream, unlinkSync, existsSync, mkdirSync, createReadStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
+import { createGzip } from "node:zlib";
 import { promisify } from "node:util";
 import path from "node:path";
 import * as cron from "node-cron";
@@ -169,10 +170,12 @@ const backupWorker = new Worker(
         }
       }
 
-      // 1. Obter comando a executar
-
-      let dumpCommand = "";
-      const isDb = source.type === "MYSQL" || source.type === "POSTGRESQL";
+      // 1. Obter executável e argumentos estruturados (previne command injection)
+      let execCommand = "";
+      let execArgs: string[] = [];
+      let extraEnv: Record<string, string> = {};
+      let isAlreadyCompressed = false;
+      let remoteSshCmd = "";
 
       if (source.type === "MYSQL") {
         const dbUser = config.dbUser || "root";
@@ -180,41 +183,81 @@ const backupWorker = new Worker(
         const dbName = config.dbName || "";
         const dockerName = config.dockerName || "";
 
-        const passArg = dbPassword ? `-p"${dbPassword}"` : "";
-
         if (dockerName) {
-          // Descoberta dinâmica de contêiner
-          await log("INFO", `Buscando contêiner Docker correspondente a: ${dockerName}`);
-          const containerIdCmd = `docker ps -q -f name=${dockerName} | head -n 1`;
-          dumpCommand = `container_id=$(${containerIdCmd}); if [ -n "$container_id" ]; then docker exec -i $container_id mysqldump -u${dbUser} ${passArg} ${dbName} --single-transaction --quick --routines --triggers --events --hex-blob | gzip; else echo "Contêiner não encontrado" >&2; exit 1; fi`;
+          await log("INFO", `Executando mysqldump via Docker no contêiner: ${dockerName}`);
+          execCommand = "docker";
+          execArgs = [
+            "exec",
+            "-i",
+            dockerName,
+            "mysqldump",
+            `-u${dbUser}`,
+            ...(dbPassword ? [`-p${dbPassword}`] : []),
+            dbName,
+            "--single-transaction",
+            "--quick",
+            "--routines",
+            "--triggers",
+            "--events",
+            "--hex-blob",
+          ];
         } else {
-          dumpCommand = `mysqldump -u${dbUser} ${passArg} ${dbName} --single-transaction --quick --routines --triggers --events --hex-blob | gzip`;
+          execCommand = "mysqldump";
+          execArgs = [
+            `-u${dbUser}`,
+            ...(dbPassword ? [`-p${dbPassword}`] : []),
+            dbName,
+            "--single-transaction",
+            "--quick",
+            "--routines",
+            "--triggers",
+            "--events",
+            "--hex-blob",
+          ];
         }
+        remoteSshCmd = `mysqldump -u${dbUser} ${dbPassword ? `-p"${dbPassword}"` : ""} ${dbName} --single-transaction --quick --routines --triggers --events --hex-blob | gzip`;
       } else if (source.type === "POSTGRESQL") {
         const dbUser = config.dbUser || "postgres";
         const dbPassword = config.dbPassword || "";
         const dbName = config.dbName || "";
         const dockerName = config.dockerName || "";
 
-        const passEnv = dbPassword ? `PGPASSWORD="${dbPassword}" ` : "";
+        if (dbPassword) extraEnv.PGPASSWORD = dbPassword;
 
         if (dockerName) {
-          await log("INFO", `Buscando contêiner PostgreSQL correspondente a: ${dockerName}`);
-          const containerIdCmd = `docker ps -q -f name=${dockerName} | head -n 1`;
-          dumpCommand = `container_id=$(${containerIdCmd}); if [ -n "$container_id" ]; then ${passEnv}docker exec -i -e PGPASSWORD="${dbPassword}" $container_id pg_dump -U${dbUser} -d${dbName} -Fp | gzip; else echo "Contêiner não encontrado" >&2; exit 1; fi`;
+          await log("INFO", `Executando pg_dump via Docker no contêiner: ${dockerName}`);
+          execCommand = "docker";
+          execArgs = [
+            "exec",
+            "-i",
+            ...(dbPassword ? ["-e", `PGPASSWORD=${dbPassword}`] : []),
+            dockerName,
+            "pg_dump",
+            `-U${dbUser}`,
+            `-d${dbName}`,
+            "-Fp",
+          ];
         } else {
-          dumpCommand = `${passEnv}pg_dump -U${dbUser} -d${dbName} -Fp | gzip`;
+          execCommand = "pg_dump";
+          execArgs = [`-U${dbUser}`, `-d${dbName}`, "-Fp"];
         }
+        remoteSshCmd = `${dbPassword ? `PGPASSWORD="${dbPassword}" ` : ""}pg_dump -U${dbUser} -d${dbName} -Fp | gzip`;
       } else if (source.type === "DIRECTORY") {
         const targetPath = config.path || "";
         if (!targetPath) throw new Error("Caminho do diretório não configurado.");
         const parent = path.dirname(targetPath);
         const base = path.basename(targetPath);
-        dumpCommand = `tar -czf - -C "${parent}" "${base}"`;
+        execCommand = "tar";
+        execArgs = ["-czf", "-", "-C", parent, base];
+        isAlreadyCompressed = true;
+        remoteSshCmd = `tar -czf - -C "${parent}" "${base}"`;
       } else if (source.type === "DOCKER_VOLUME") {
         const volumeName = config.volumeName || "";
         if (!volumeName) throw new Error("Nome do volume Docker não configurado.");
-        dumpCommand = `docker run --rm -v "${volumeName}":/volume alpine tar -czf - -C /volume .`;
+        execCommand = "docker";
+        execArgs = ["run", "--rm", "-v", `${volumeName}:/volume`, "alpine", "tar", "-czf", "-", "-C", "/volume", "."];
+        isAlreadyCompressed = true;
+        remoteSshCmd = `docker run --rm -v "${volumeName}":/volume alpine tar -czf - -C /volume .`;
       }
 
       await updateProgress(20, "Executando Backup", "RUNNING");
@@ -228,7 +271,6 @@ const backupWorker = new Worker(
         const password = source.server.encryptedPassword ? decryptSecret(source.server.encryptedPassword) : null;
         const privateKey = source.server.encryptedPrivateKey ? decryptSecret(source.server.encryptedPrivateKey) : null;
 
-        // Conectar SSH
         const conn = new Client();
         const sshOpts: any = {
           host,
@@ -246,12 +288,11 @@ const backupWorker = new Worker(
             .connect(sshOpts);
         });
 
-        await log("INFO", "Conexão SSH estabelecida. Executando dump...");
+        await log("INFO", "Conexão SSH estabelecida. Executando dump remoto...");
 
-        // Executar e pipe para o arquivo local
         const writeStream = createWriteStream(localTempFilePath);
         await new Promise<void>((resolve, reject) => {
-          conn.exec(dumpCommand, (err, stream) => {
+          conn.exec(remoteSshCmd, (err, stream) => {
             if (err) {
               conn.end();
               reject(err);
@@ -260,7 +301,7 @@ const backupWorker = new Worker(
             stream.on("close", (code: number) => {
               conn.end();
               if (code !== 0) {
-                reject(new Error(`Comando falhou com código de saída ${code}`));
+                reject(new Error(`Comando remoto falhou com código de saída ${code}`));
               } else {
                 resolve();
               }
@@ -273,20 +314,36 @@ const backupWorker = new Worker(
           });
         });
       } else {
-        // Executar localmente
-        await log("INFO", "Executando dump localmente no host do worker...");
+        // Executar localmente via execFile seguro (sem passar pela shell)
+        await log("INFO", `Executando dump local seguro: ${execCommand} ${execArgs.join(" ")}`);
         const writeStream = createWriteStream(localTempFilePath);
+
         await new Promise<void>((resolve, reject) => {
-          const child = exec(dumpCommand);
-          child.stdout?.pipe(writeStream);
+          const child = execFile(
+            execCommand,
+            execArgs,
+            { env: { ...process.env, ...extraEnv } },
+            (err) => {
+              if (err && err.code !== 0) {
+                reject(new Error(`Comando "${execCommand}" falhou com código ${err.code ?? 1}: ${err.message}`));
+              }
+            }
+          );
+
           child.stderr?.on("data", (data) => {
             const msg = data.toString().trim();
             if (msg) void log("WARNING", `[stderr] ${msg}`);
           });
-          child.on("close", (code) => {
-            if (code !== 0) reject(new Error(`Comando falhou localmente com código ${code}`));
-            else resolve();
-          });
+
+          if (isAlreadyCompressed) {
+            child.stdout?.pipe(writeStream);
+          } else {
+            const gzip = createGzip();
+            child.stdout?.pipe(gzip).pipe(writeStream);
+          }
+
+          writeStream.on("finish", () => resolve());
+          writeStream.on("error", (err) => reject(err));
         });
       }
 

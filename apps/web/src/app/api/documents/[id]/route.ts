@@ -19,6 +19,23 @@ export async function PATCH(
         { error: "Documento não encontrado." },
         { status: 404 },
       );
+
+    if (document.sectorId && tenant.role !== "SUPER_ADMIN" && tenant.role !== "ADMIN") {
+      const membership = await prisma.sectorUser.findUnique({
+        where: {
+          sectorId_userId: {
+            sectorId: document.sectorId,
+            userId: tenant.userId,
+          },
+        },
+      });
+      if (!membership || membership.role === "VIEWER_ONLY" || membership.role === "NO_ACCESS") {
+        return Response.json(
+          { error: "Permissão insuficiente para alterar documentos desta Secretaria." },
+          { status: 403 },
+        );
+      }
+    }
     const body = (await request.json()) as {
       action?: "rename" | "move" | "trash" | "restore";
       name?: string;

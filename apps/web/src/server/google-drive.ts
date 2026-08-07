@@ -126,3 +126,43 @@ export async function ensureDriveRoot(
   });
   return { ...result, rootFolderId: organization };
 }
+
+export async function ensureSectorDriveFolder(
+  organizationId: string,
+  organizationName: string,
+  sectorId: string,
+  sectorName: string,
+) {
+  const { connection, drive, rootFolderId } = await ensureDriveRoot(
+    organizationId,
+    organizationName,
+  );
+
+  const storageSpace = await prisma.storageSpace.findFirst({
+    where: { organizationId, sectorId, deletedAt: null },
+  });
+
+  if (storageSpace?.rootFolderId) {
+    return { connection, drive, sectorFolderId: storageSpace.rootFolderId };
+  }
+
+  const sectorFolderId = await drive.createFolder(sectorName, rootFolderId);
+
+  if (storageSpace) {
+    await prisma.storageSpace.update({
+      where: { id: storageSpace.id },
+      data: { rootFolderId: sectorFolderId },
+    });
+  } else {
+    await prisma.storageSpace.create({
+      data: {
+        organizationId,
+        sectorId,
+        name: sectorName,
+        rootFolderId: sectorFolderId,
+      },
+    });
+  }
+
+  return { connection, drive, sectorFolderId };
+}
