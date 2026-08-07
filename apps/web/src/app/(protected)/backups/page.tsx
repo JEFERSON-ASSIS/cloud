@@ -337,8 +337,24 @@ export default function BackupsPage() {
     }
   };
 
-  const handleOpenLogs = async (run: BackupRun) => {
+  const handleDeleteRun = async (id: string) => {
+    if (!confirm("Tem certeza que deseja excluir este registro de execução do histórico?")) return;
+    setError("");
+    try {
+      const res = await fetch(`/api/backup-runs/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setSuccess("Registro de execução excluído com sucesso.");
+        await loadData(false);
+      } else {
+        const data = await res.json();
+        setError(data.error || "Erro ao excluir execução.");
+      }
+    } catch {
+      setError("Erro de rede.");
+    }
+  };
 
+  const handleOpenLogs = async (run: BackupRun) => {
     setSelectedRun(run);
     setLogDialogOpen(true);
     setRunLogs([]);
@@ -349,7 +365,7 @@ export default function BackupsPage() {
       const res = await fetch(`/api/backup-runs/${run.id}`);
       const data = await res.json();
       if (res.ok) {
-        setRunLogs(data.logs);
+        setRunLogs(data.logs || []);
       }
     } catch {
       setError("Erro de rede ao carregar logs.");
@@ -493,6 +509,14 @@ export default function BackupsPage() {
                       >
                         Logs
                       </Button>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        title="Excluir do histórico"
+                        onClick={() => void handleDeleteRun(run.id)}
+                      >
+                        <Delete fontSize="small" />
+                      </IconButton>
                     </Stack>
 
                   </Box>

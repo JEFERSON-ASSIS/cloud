@@ -25,7 +25,32 @@ export async function GET(request: Request, { params }: { params: Params }) {
       },
     });
 
-    return NextResponse.json(run);
+    const sanitizedFiles = run.files.map((f) => ({
+      ...f,
+      size: f.size.toString(),
+    }));
+
+    return NextResponse.json({
+      ...run,
+      files: sanitizedFiles,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erro desconhecido";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request, { params }: { params: Params }) {
+  try {
+    const tenant = await requireTenant("backup.manage");
+    const organizationId = tenant.organizationId!;
+    const { id } = await params;
+
+    await prisma.backupRun.deleteMany({
+      where: { id, organizationId },
+    });
+
+    return NextResponse.json({ success: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido";
     return NextResponse.json({ error: message }, { status: 500 });
