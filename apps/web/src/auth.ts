@@ -1,6 +1,7 @@
 import argon2 from "argon2";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import GoogleProvider from "next-auth/providers/google";
 import { prisma } from "@i7ai/database";
 import type { Permission, RoleName } from "@i7ai/types";
 import { z } from "zod";
@@ -10,11 +11,17 @@ const credentialsSchema = z.object({
   email: z.email().transform((v) => v.trim().toLowerCase()),
   password: z.string().min(8).max(200),
 });
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   secret: process.env.AUTH_SECRET!,
   session: { strategy: "jwt", maxAge: 8 * 60 * 60, updateAge: 30 * 60 },
   providers: [
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID || "",
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+      allowDangerousEmailAccountLinking: true,
+    }),
     Credentials({
       credentials: { email: {}, password: {} },
       async authorize(raw) {
@@ -72,13 +79,48 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
   callbacks: {
     ...authConfig.callbacks,
+    async signIn({ user, account }) {
+      if (account?.provider === "google") {
+        if (!user.email) return false;
+        const dbUser = await prisma.user.findUnique({
+          where: { email: user.email.toLowerCase() },
+          include: {
+            organizations: {
+              where: { organization: { status: "ACTIVE", deletedAt: null } },
+              orderBy: { isDefault: "desc" },
+              include: {
+                organization: true,
+                role: {
+                  include: { permissions: { include: { permission: true } } },
+                },
+              },
+            },
+          },
+        });
+        if (!dbUser || dbUser.status !== "ACTIVE" || dbUser.deletedAt) {
+          return false;
+        }
+        const membership = dbUser.organizations[0];
+        if (!membership) return false;
+
+        user.id = dbUser.id;
+        (user as any).organizationId = membership.organizationId;
+        (user as any).organizationName = membership.organization.name;
+        (user as any).role = membership.role.name as RoleName;
+        (user as any).permissions = membership.role.permissions.map(
+          (item) => item.permission.key as Permission
+        );
+        return true;
+      }
+      return true;
+    },
     jwt({ token, user }) {
       if (user) {
         token.userId = user.id!;
-        token.organizationId = user.organizationId;
-        token.organizationName = user.organizationName;
-        token.role = user.role;
-        token.permissions = user.permissions;
+        token.organizationId = (user as any).organizationId;
+        token.organizationName = (user as any).organizationName;
+        token.role = (user as any).role;
+        token.permissions = (user as any).permissions;
       }
       return token;
     },
