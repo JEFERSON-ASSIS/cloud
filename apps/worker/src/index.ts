@@ -832,7 +832,10 @@ async function syncScheduler() {
     for (const schedule of schedules) {
       const timezone = schedule.timezone || "America/Cuiaba";
       const expression = freqToCronExpression(schedule.frequency, schedule.time);
-      const sourceNames = schedule.sources.map((item) => item.source.name).join(", ") || "(nenhuma)";
+      const sourceNames =
+        schedule.sources
+          .map((item: { source: { name: string } }) => item.source.name)
+          .join(", ") || "(nenhuma)";
 
       if (activeCronJobs.has(schedule.id)) {
         const entry = activeCronJobs.get(schedule.id)!;
