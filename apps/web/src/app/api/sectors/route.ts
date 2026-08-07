@@ -1,5 +1,7 @@
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
+import { decryptSecret } from "@/server/encryption";
+import { GoogleDriveStorageProvider } from "@i7ai/storage";
 
 export async function GET() {
   try {
@@ -85,6 +87,57 @@ export async function POST(request: Request) {
         quotaLimit,
       },
     });
+
+    // Tentar instanciar imediatamente as pastas no Google Drive se houver conexão
+    try {
+      const connection = await prisma.storageConnection.findFirst({
+        where: { organizationId, provider: "GOOGLE_DRIVE", status: "CONNECTED", deletedAt: null },
+        include: { googleDrive: true },
+      });
+
+      if (connection?.googleDrive) {
+        const accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
+        const drive = new GoogleDriveStorageProvider(accessToken);
+
+        let mainOrgFolderId = connection.googleDrive.rootFolderId || undefined;
+        if (!mainOrgFolderId) {
+          const rootItems = await drive.list("root");
+          const existingOrgFolder = rootItems.find((i) => i.name === organization.name);
+          if (existingOrgFolder) {
+            mainOrgFolderId = existingOrgFolder.id;
+          } else {
+            mainOrgFolderId = await drive.createFolder(organization.name);
+          }
+          await prisma.googleDriveConnection.update({
+            where: { id: connection.googleDrive.id },
+            data: { rootFolderId: mainOrgFolderId },
+          });
+        }
+
+        const orgItems = await drive.list(mainOrgFolderId || "root");
+        let sectorDriveFolderId = orgItems.find((i) => i.name === sector.name)?.id;
+        if (!sectorDriveFolderId) {
+          sectorDriveFolderId = await drive.createFolder(sector.name, mainOrgFolderId);
+        }
+
+        const sectorItems = await drive.list(sectorDriveFolderId);
+        let backupsFolderId = sectorItems.find((i) => i.name === "Backups")?.id;
+        if (!backupsFolderId) {
+          await drive.createFolder("Backups", sectorDriveFolderId);
+        }
+
+        await prisma.storageSpace.create({
+          data: {
+            organizationId,
+            sectorId: sector.id,
+            name: sector.name,
+            rootFolderId: sectorDriveFolderId,
+          },
+        });
+      }
+    } catch (errDrive) {
+      console.warn("Aviso: Não foi possível instanciar pastas no Google Drive na criação da secretaria:", errDrive);
+    }
 
     return Response.json(
       {
