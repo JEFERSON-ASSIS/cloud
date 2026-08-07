@@ -1,7 +1,6 @@
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
-import { decryptSecret } from "@/server/encryption";
-import { GoogleDriveStorageProvider } from "@i7ai/storage";
+import { getGoogleDriveProvider } from "@/server/drive";
 
 export async function PATCH(
   req: Request,
@@ -67,14 +66,9 @@ export async function DELETE(
 
     // Tentar deletar as pastas exatas da Empresa e Secretarias no Google Drive pelo ID do banco
     try {
-      const connection = await prisma.storageConnection.findFirst({
-        where: { provider: "GOOGLE_DRIVE", status: "CONNECTED", deletedAt: null },
-        include: { googleDrive: true },
-      });
-
-      if (connection?.googleDrive) {
-        const accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
-        const drive = new GoogleDriveStorageProvider(accessToken);
+      const driveInfo = await getGoogleDriveProvider(id);
+      if (driveInfo) {
+        const { drive } = driveInfo;
 
         // 1. Deletar por ID exato das pastas das Secretarias registradas no banco
         const storageSpaces = await prisma.storageSpace.findMany({

@@ -1,7 +1,6 @@
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
-import { decryptSecret } from "@/server/encryption";
-import { GoogleDriveStorageProvider } from "@i7ai/storage";
+import { getGoogleDriveProvider } from "@/server/drive";
 
 export async function GET(request: Request) {
   try {
@@ -106,16 +105,12 @@ export async function POST(request: Request) {
 
     // Tentar instanciar imediatamente as pastas no Google Drive se houver conexão
     try {
-      const connection = await prisma.storageConnection.findFirst({
-        where: { organizationId, provider: "GOOGLE_DRIVE", status: "CONNECTED", deletedAt: null },
-        include: { googleDrive: true },
-      });
+      const driveInfo = await getGoogleDriveProvider(organizationId);
 
-      if (connection?.googleDrive) {
-        const accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
-        const drive = new GoogleDriveStorageProvider(accessToken);
+      if (driveInfo) {
+        const { drive, connection } = driveInfo;
 
-        let mainOrgFolderId = connection.googleDrive.rootFolderId || undefined;
+        let mainOrgFolderId = connection.googleDrive?.rootFolderId || undefined;
         if (!mainOrgFolderId) {
           const rootItems = await drive.list("root");
           const existingOrgFolder = rootItems.find((i) => i.name === organization.name);
@@ -124,10 +119,12 @@ export async function POST(request: Request) {
           } else {
             mainOrgFolderId = await drive.createFolder(organization.name);
           }
-          await prisma.googleDriveConnection.update({
-            where: { id: connection.googleDrive.id },
-            data: { rootFolderId: mainOrgFolderId },
-          });
+          if (connection.googleDrive) {
+            await prisma.googleDriveConnection.update({
+              where: { id: connection.googleDrive.id },
+              data: { rootFolderId: mainOrgFolderId },
+            });
+          }
         }
 
         const orgItems = await drive.list(mainOrgFolderId || "root");

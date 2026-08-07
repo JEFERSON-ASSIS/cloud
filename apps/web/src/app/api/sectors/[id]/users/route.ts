@@ -9,11 +9,12 @@ export async function GET(
   try {
     const tenant = await requireTenant("user.read");
     const { id } = await params;
-    const organizationId = tenant.organizationId!;
 
-    // Validar se o setor pertence à organização
+    // Validar se o setor existe (Super Admin acessa qualquer setor)
     await prisma.sector.findFirstOrThrow({
-      where: { id, organizationId, deletedAt: null },
+      where: tenant.role === "SUPER_ADMIN"
+        ? { id, deletedAt: null }
+        : { id, organizationId: tenant.organizationId!, deletedAt: null },
     });
 
     const members = await prisma.sectorUser.findMany({
@@ -46,12 +47,14 @@ export async function POST(
   try {
     const tenant = await requireTenant("user.manage");
     const { id } = await params;
-    const organizationId = tenant.organizationId!;
 
-    // Validar se o setor pertence à organização
-    await prisma.sector.findFirstOrThrow({
-      where: { id, organizationId, deletedAt: null },
+    // Validar se o setor existe e obter a sua organizationId
+    const sector = await prisma.sector.findFirstOrThrow({
+      where: tenant.role === "SUPER_ADMIN"
+        ? { id, deletedAt: null }
+        : { id, organizationId: tenant.organizationId!, deletedAt: null },
     });
+    const organizationId = sector.organizationId;
 
     const body = (await request.json()) as {
       email?: string;
@@ -74,8 +77,8 @@ export async function POST(
       return Response.json({ error: "Usuário não encontrado." }, { status: 404 });
     }
 
-    // Verificar se o usuário faz parte da organização
-    const orgMembership = await prisma.organizationUser.findUnique({
+    // Se o usuário não for da organização e quem executa for Super Admin, garante o vínculo na organização
+    let orgMembership = await prisma.organizationUser.findUnique({
       where: {
         organizationId_userId: {
           organizationId,
@@ -83,6 +86,16 @@ export async function POST(
         },
       },
     });
+
+    if (!orgMembership && tenant.role === "SUPER_ADMIN") {
+      orgMembership = await prisma.organizationUser.create({
+        data: {
+          organizationId,
+          userId: user.id,
+          roleId: (await prisma.role.findUnique({ where: { name: "VIEWER" } }))?.id || (await prisma.role.findFirstOrThrow()).id,
+        },
+      });
+    }
 
     if (!orgMembership) {
       return Response.json(
@@ -123,11 +136,12 @@ export async function DELETE(
   try {
     const tenant = await requireTenant("user.manage");
     const { id } = await params;
-    const organizationId = tenant.organizationId!;
 
-    // Validar se o setor pertence à organização
+    // Validar se o setor existe
     await prisma.sector.findFirstOrThrow({
-      where: { id, organizationId, deletedAt: null },
+      where: tenant.role === "SUPER_ADMIN"
+        ? { id, deletedAt: null }
+        : { id, organizationId: tenant.organizationId!, deletedAt: null },
     });
 
     const url = new URL(request.url);

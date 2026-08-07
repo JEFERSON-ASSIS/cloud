@@ -1,7 +1,6 @@
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
-import { decryptSecret } from "@/server/encryption";
-import { GoogleDriveStorageProvider } from "@i7ai/storage";
+import { getGoogleDriveProvider } from "@/server/drive";
 
 export async function GET() {
   try {
@@ -83,20 +82,15 @@ export async function POST(req: Request) {
 
     // Tentar criar pasta mãe da Organização no Google Drive se houver conexão ativa
     try {
-      const connection = await prisma.storageConnection.findFirst({
-        where: { provider: "GOOGLE_DRIVE", status: "CONNECTED", deletedAt: null },
-        include: { googleDrive: true },
-      });
-
-      if (connection?.googleDrive) {
-        const accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
-        const drive = new GoogleDriveStorageProvider(accessToken);
+      const driveInfo = await getGoogleDriveProvider();
+      if (driveInfo) {
+        const { drive, connection } = driveInfo;
         const rootItems = await drive.list("root");
         let orgFolderId = rootItems.find((i) => i.name === newOrg.name)?.id;
         if (!orgFolderId) {
           orgFolderId = await drive.createFolder(newOrg.name);
         }
-        if (!connection.googleDrive.rootFolderId) {
+        if (connection.googleDrive && !connection.googleDrive.rootFolderId) {
           await prisma.googleDriveConnection.update({
             where: { id: connection.googleDrive.id },
             data: { rootFolderId: orgFolderId },

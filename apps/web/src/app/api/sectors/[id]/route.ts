@@ -1,7 +1,6 @@
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
-import { decryptSecret } from "@/server/encryption";
-import { GoogleDriveStorageProvider } from "@i7ai/storage";
+import { getGoogleDriveProvider } from "@/server/drive";
 
 export async function PATCH(
   request: Request,
@@ -10,12 +9,14 @@ export async function PATCH(
   try {
     const tenant = await requireTenant("user.manage");
     const { id } = await params;
-    const organizationId = tenant.organizationId!;
 
-    // Verificar se o setor pertence à organização do usuário
-    await prisma.sector.findFirstOrThrow({
-      where: { id, organizationId, deletedAt: null },
+    // Verificar se o setor existe (Super Admin acessa qualquer setor)
+    const sectorObj = await prisma.sector.findFirstOrThrow({
+      where: tenant.role === "SUPER_ADMIN"
+        ? { id, deletedAt: null }
+        : { id, organizationId: tenant.organizationId!, deletedAt: null },
     });
+    const organizationId = sectorObj.organizationId;
 
     const body = (await request.json()) as {
       name?: string;
@@ -91,29 +92,25 @@ export async function DELETE(
   try {
     const tenant = await requireTenant("user.manage");
     const { id } = await params;
-    const organizationId = tenant.organizationId!;
 
-    // Verificar se o setor pertence à organização
-    await prisma.sector.findFirstOrThrow({
-      where: { id, organizationId, deletedAt: null },
+    // Verificar se o setor existe (Super Admin deleta qualquer setor)
+    const sectorObj = await prisma.sector.findFirstOrThrow({
+      where: tenant.role === "SUPER_ADMIN"
+        ? { id, deletedAt: null }
+        : { id, organizationId: tenant.organizationId!, deletedAt: null },
     });
+    const organizationId = sectorObj.organizationId;
 
-    // Tentar excluir a pasta da secretaria no Google Drive para nao deixar lixo
+    // Tentar excluir a pasta da secretaria no Google Drive pelo ID exato
     try {
       const storageSpace = await prisma.storageSpace.findFirst({
         where: { organizationId, sectorId: id, deletedAt: null },
       });
 
       if (storageSpace?.rootFolderId) {
-        const connection = await prisma.storageConnection.findFirst({
-          where: { provider: "GOOGLE_DRIVE", status: "CONNECTED", deletedAt: null },
-          include: { googleDrive: true },
-        });
-
-        if (connection?.googleDrive) {
-          const accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
-          const drive = new GoogleDriveStorageProvider(accessToken);
-          await drive.delete(storageSpace.rootFolderId);
+        const driveInfo = await getGoogleDriveProvider(organizationId);
+        if (driveInfo) {
+          await driveInfo.drive.delete(storageSpace.rootFolderId);
         }
       }
     } catch (errDrive) {
