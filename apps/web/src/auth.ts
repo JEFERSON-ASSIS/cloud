@@ -7,6 +7,7 @@ import { prisma } from "@i7ai/database";
 import type { Permission, RoleName } from "@i7ai/types";
 import { z } from "zod";
 import { authConfig } from "./auth.config";
+import { menuKeysFromPermissions } from "@/lib/nav-items";
 
 const credentialsSchema = z.object({
   email: z.email().transform((v) => v.trim().toLowerCase()),
@@ -42,7 +43,10 @@ providers.push(
             include: {
               organization: true,
               role: {
-                include: { permissions: { include: { permission: true } } },
+                include: {
+                  permissions: { include: { permission: true } },
+                  menuItems: { select: { menuKey: true } },
+                },
               },
             },
           },
@@ -69,6 +73,10 @@ providers.push(
           resourceType: "Session",
         },
       });
+      const permissions = membership.role.permissions.map(
+        (item) => item.permission.key as Permission
+      );
+      const storedMenuKeys = membership.role.menuItems.map((item) => item.menuKey);
       return {
         id: user.id,
         name: user.name,
@@ -76,9 +84,11 @@ providers.push(
         organizationId: membership.organizationId,
         organizationName: membership.organization.name,
         role: membership.role.name as RoleName,
-        permissions: membership.role.permissions.map(
-          (item) => item.permission.key as Permission
-        ),
+        permissions,
+        menuKeys:
+          storedMenuKeys.length > 0
+            ? storedMenuKeys
+            : menuKeysFromPermissions(permissions),
       };
     },
   })
@@ -103,7 +113,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               include: {
                 organization: true,
                 role: {
-                  include: { permissions: { include: { permission: true } } },
+                  include: {
+                    permissions: { include: { permission: true } },
+                    menuItems: { select: { menuKey: true } },
+                  },
                 },
               },
             },
@@ -115,13 +128,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const membership = dbUser.organizations[0];
         if (!membership) return false;
 
+        const permissions = membership.role.permissions.map(
+          (item) => item.permission.key as Permission
+        );
+        const storedMenuKeys = membership.role.menuItems.map((item) => item.menuKey);
         user.id = dbUser.id;
         user.organizationId = membership.organizationId;
         user.organizationName = membership.organization.name;
         user.role = membership.role.name as RoleName;
-        user.permissions = membership.role.permissions.map(
-          (item) => item.permission.key as Permission
-        );
+        user.permissions = permissions;
+        user.menuKeys =
+          storedMenuKeys.length > 0
+            ? storedMenuKeys
+            : menuKeysFromPermissions(permissions);
         return true;
       }
       return true;
@@ -133,6 +152,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.organizationName = user.organizationName;
         token.role = user.role;
         token.permissions = user.permissions;
+        token.menuKeys = user.menuKeys ?? [];
       }
       return token;
     },
@@ -142,6 +162,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.organizationName = token.organizationName as string | null;
       session.user.role = token.role as RoleName | null;
       session.user.permissions = token.permissions as Permission[];
+      session.user.menuKeys = (token.menuKeys as string[] | undefined) ?? [];
       return session;
     },
   },

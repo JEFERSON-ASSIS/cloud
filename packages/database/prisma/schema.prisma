@@ -147,8 +147,19 @@ model Role {
   description       String?
   organizationUsers OrganizationUser[]
   permissions       RolePermission[]
+  menuItems         RoleMenuItem[]
 
   @@map("roles")
+}
+
+model RoleMenuItem {
+  roleId  String @map("role_id") @db.Uuid
+  menuKey String @map("menu_key")
+  role    Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, menuKey])
+  @@index([menuKey])
+  @@map("role_menu_items")
 }
 
 model Permission {

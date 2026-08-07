@@ -8,6 +8,7 @@ declare module "next-auth" {
       organizationName: string | null;
       role: RoleName | null;
       permissions: Permission[];
+      menuKeys: string[];
     };
   }
   interface User {
@@ -15,6 +16,7 @@ declare module "next-auth" {
     organizationName: string | null;
     role: RoleName | null;
     permissions: Permission[];
+    menuKeys: string[];
   }
 }
 declare module "next-auth/jwt" {
@@ -24,5 +26,6 @@ declare module "next-auth/jwt" {
     organizationName: string | null;
     role: RoleName | null;
     permissions: Permission[];
+    menuKeys: string[];
   }
 }

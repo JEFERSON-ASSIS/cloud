@@ -38,6 +38,38 @@ const rolePermissions: Record<string, string[]> = {
   VIEWER: ["dashboard.read", "document.read", "backup.read"],
 };
 
+/** Visibilidade inicial do menu por perfil (itens superAdminOnly ficam só para SUPER_ADMIN no AppShell). */
+const roleMenuItems: Record<string, string[]> = {
+  ADMIN: [
+    "dashboard",
+    "secretarias",
+    "arquivos",
+    "pastas",
+    "backups",
+    "agendamentos",
+    "servidores",
+    "integracoes",
+    "usuarios",
+    "auditoria",
+    "logs",
+    "configuracoes",
+  ],
+  MANAGER: [
+    "dashboard",
+    "secretarias",
+    "arquivos",
+    "pastas",
+    "backups",
+    "agendamentos",
+    "usuarios",
+    "auditoria",
+    "logs",
+    "configuracoes",
+  ],
+  OPERATOR: ["dashboard", "arquivos", "pastas", "backups", "agendamentos"],
+  VIEWER: ["dashboard", "arquivos", "pastas", "backups"],
+};
+
 async function main() {
   const permissions = new Map<string, string>();
   for (const key of permissionKeys) {
@@ -63,6 +95,16 @@ async function main() {
       })),
       skipDuplicates: true,
     });
+    const menuKeys = roleMenuItems[name] ?? [];
+    if (menuKeys.length > 0) {
+      await prisma.roleMenuItem.createMany({
+        data: menuKeys.map((menuKey) => ({
+          roleId: role.id,
+          menuKey,
+        })),
+        skipDuplicates: true,
+      });
+    }
   }
   const email = process.env.INITIAL_ADMIN_EMAIL?.trim().toLowerCase();
   const password = process.env.INITIAL_ADMIN_PASSWORD;

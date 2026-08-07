@@ -51,37 +51,41 @@ import {
   ChevronLeft,
   FolderCopyOutlined,
   Apartment,
+  SecurityOutlined,
 } from "@mui/icons-material";
 import type { ReactNode } from "react";
 import type { Permission } from "@i7ai/types";
 import { ActiveTenantContext } from "./ActiveTenantContext";
+import {
+  menuKeysFromPermissions,
+  navItemDefinitions,
+  type MenuKey,
+} from "@/lib/nav-items";
 
 const expandedWidth = 264;
 const collapsedWidth = 76;
 
-type MenuItemType = {
-  label: string;
-  href: string;
-  icon: ReactNode;
-  permission?: Permission;
-  superAdminOnly?: boolean;
+const navIcons: Record<MenuKey, ReactNode> = {
+  dashboard: <DashboardOutlined key="d" />,
+  secretarias: <Apartment key="sec" />,
+  arquivos: <FolderOutlined key="a" />,
+  pastas: <FolderCopyOutlined key="p" />,
+  backups: <BackupOutlined key="b" />,
+  agendamentos: <ScheduleOutlined key="ag" />,
+  servidores: <DnsOutlined key="s" />,
+  integracoes: <HubOutlined key="i" />,
+  usuarios: <PeopleOutlined key="u" />,
+  empresas: <BusinessOutlined key="e" />,
+  auditoria: <FactCheckOutlined key="au" />,
+  logs: <ReceiptLongOutlined key="l" />,
+  configuracoes: <SettingsOutlined key="c" />,
+  permissoes: <SecurityOutlined key="perm" />,
 };
 
-const navItems: MenuItemType[] = [
-  { label: "Dashboard", href: "/dashboard", icon: <DashboardOutlined key="d" />, permission: "dashboard.read" },
-  { label: "Secretarias", href: "/secretarias", icon: <Apartment key="sec" />, permission: "organization.read" },
-  { label: "Arquivos", href: "/arquivos", icon: <FolderOutlined key="a" />, permission: "document.read" },
-  { label: "Pastas", href: "/pastas", icon: <FolderCopyOutlined key="p" />, permission: "document.read" },
-  { label: "Backups", href: "/backups", icon: <BackupOutlined key="b" />, permission: "backup.read" },
-  { label: "Agendamentos", href: "/agendamentos", icon: <ScheduleOutlined key="ag" />, permission: "backup.read" },
-  { label: "Servidores", href: "/servidores", icon: <DnsOutlined key="s" />, permission: "integration.manage" },
-  { label: "Integrações", href: "/integracoes", icon: <HubOutlined key="i" />, permission: "integration.manage" },
-  { label: "Usuários", href: "/usuarios", icon: <PeopleOutlined key="u" />, permission: "user.read" },
-  { label: "Empresas", href: "/empresas", icon: <BusinessOutlined key="e" />, permission: "organization.manage", superAdminOnly: true },
-  { label: "Auditoria", href: "/auditoria", icon: <FactCheckOutlined key="au" />, permission: "audit.read" },
-  { label: "Logs", href: "/logs", icon: <ReceiptLongOutlined key="l" />, permission: "audit.read" },
-  { label: "Configurações", href: "/configuracoes", icon: <SettingsOutlined key="c" />, permission: "organization.read" },
-];
+const navItems = navItemDefinitions.map((item) => ({
+  ...item,
+  icon: navIcons[item.key],
+}));
 
 type OrganizationOption = {
   id: string;
@@ -111,14 +115,18 @@ export function AppShell({ children }: PropsWithChildren) {
   );
 
   const userRole = data?.user?.role;
-  const userPermissions = data?.user?.permissions ?? [];
+  const userPermissions = (data?.user?.permissions ?? []) as Permission[];
+  const sessionMenuKeys = data?.user?.menuKeys ?? [];
+  const effectiveMenuKeys =
+    sessionMenuKeys.length > 0
+      ? sessionMenuKeys
+      : menuKeysFromPermissions(userPermissions);
 
-  // Filtragem dinâmica de menus por permissão e perfil
+  // Filtragem: SUPER_ADMIN vê tudo; demais usam menuKeys (fallback por permission)
   const filteredNavItems = navItems.filter((item) => {
     if (userRole === "SUPER_ADMIN") return true;
     if (item.superAdminOnly) return false;
-    if (!item.permission) return true;
-    return userPermissions.includes(item.permission);
+    return effectiveMenuKeys.includes(item.key);
   });
 
   const fetchOrganizations = useCallback(() => {
