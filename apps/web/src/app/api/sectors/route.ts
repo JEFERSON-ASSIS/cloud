@@ -189,22 +189,51 @@ export async function POST(request: Request) {
         }
 
         // 4. Salvar ou atualizar StorageSpace
-        const existingStorageSpace = await prisma.storageSpace.findFirst({
+        let space = await prisma.storageSpace.findFirst({
           where: { organizationId, sectorId: sector.id },
         });
 
-        if (existingStorageSpace) {
-          await prisma.storageSpace.update({
-            where: { id: existingStorageSpace.id },
+        if (space) {
+          space = await prisma.storageSpace.update({
+            where: { id: space.id },
             data: { rootFolderId: sectorDriveFolderId, deletedAt: null },
           });
         } else {
-          await prisma.storageSpace.create({
+          space = await prisma.storageSpace.create({
             data: {
               organizationId,
               sectorId: sector.id,
               name: sector.name,
               rootFolderId: sectorDriveFolderId,
+            },
+          });
+        }
+
+        // 5. Garantir pasta em prisma.folder para aparecer em /arquivos e /pastas
+        const existingFolder = await prisma.folder.findFirst({
+          where: { organizationId, sectorId: sector.id, parentId: null },
+        });
+
+        if (existingFolder) {
+          await prisma.folder.update({
+            where: { id: existingFolder.id },
+            data: {
+              name: sector.name,
+              storageFolderId: sectorDriveFolderId,
+              storageSpaceId: space.id,
+              deletedAt: null,
+            },
+          });
+        } else {
+          await prisma.folder.create({
+            data: {
+              organizationId,
+              sectorId: sector.id,
+              storageSpaceId: space.id,
+              name: sector.name,
+              storageFolderId: sectorDriveFolderId,
+              createdById: tenant.userId,
+              parentId: null,
             },
           });
         }

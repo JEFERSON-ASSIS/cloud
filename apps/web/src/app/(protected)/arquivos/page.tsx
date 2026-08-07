@@ -91,6 +91,8 @@ export default function FilesPage() {
     if (folderId) p.set("folderId", folderId);
     if (search) p.set("search", search);
     if (trash) p.set("trash", "1");
+    const activeOrgId = localStorage.getItem("active-org-id");
+    if (activeOrgId) p.set("organizationId", activeOrgId);
     const activeSectorId = localStorage.getItem("active-sector-id");
     if (activeSectorId) p.set("sectorId", activeSectorId);
 
@@ -111,8 +113,10 @@ export default function FilesPage() {
   }, [folderId, search, trash]);
 
   useEffect(() => {
-    const t = setTimeout(() => void load(), 250);
-    return () => clearTimeout(t);
+    void load();
+    const handleOrgChange = () => void load();
+    window.addEventListener("active-org-changed", handleOrgChange);
+    return () => window.removeEventListener("active-org-changed", handleOrgChange);
   }, [load]);
 
   useEffect(() => {

@@ -81,8 +81,20 @@ export default function AuditPage() {
   const [actionFilter, setActionFilter] = useState("");
   const [userFilter, setUserFilter] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("audit-auto-refresh") === "true";
+    }
+    return false;
+  });
   const [selectedMetadata, setSelectedMetadata] = useState<any | null>(null);
+
+  const handleAutoRefreshToggle = (checked: boolean) => {
+    setAutoRefresh(checked);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("audit-auto-refresh", String(checked));
+    }
+  };
 
   const loadAuditLogs = useCallback(async (showProgress = true) => {
     if (showProgress) setLoading(true);
@@ -112,7 +124,7 @@ export default function AuditPage() {
     } catch {
       setError("Erro de conexão com o servidor.");
     } finally {
-      setLoading(false);
+      if (showProgress) setLoading(false);
     }
   }, [actionFilter, userFilter, selectedOrgId]);
 
@@ -228,7 +240,7 @@ export default function AuditPage() {
               control={
                 <Switch
                   checked={autoRefresh}
-                  onChange={(e) => setAutoRefresh(e.target.checked)}
+                  onChange={(e) => handleAutoRefreshToggle(e.target.checked)}
                   color="primary"
                   size="small"
                 />

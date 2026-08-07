@@ -8,11 +8,18 @@ const createUserSchema = z.object({
   password: z.string().min(12).max(200),
   role: z.enum(["ADMIN", "MANAGER", "OPERATOR", "VIEWER"]),
 });
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const tenant = await requireTenant("user.read");
+    const url = new URL(request.url);
+    const paramOrgId = url.searchParams.get("organizationId");
+    const organizationId =
+      tenant.role === "SUPER_ADMIN" && paramOrgId
+        ? paramOrgId
+        : tenant.organizationId!;
+
     const users = await prisma.organizationUser.findMany({
-      where: { organizationId: tenant.organizationId! },
+      where: { organizationId },
       include: { user: true, role: true },
       orderBy: { user: { name: "asc" } },
     });

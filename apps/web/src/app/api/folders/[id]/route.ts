@@ -12,45 +12,67 @@ export async function PATCH(
     const tenant = await requireTenant("document.manage");
     const { id } = await context.params;
     const folder = await prisma.folder.findFirst({
-      where: { id, organizationId: tenant.organizationId! },
+      where: tenant.role === "SUPER_ADMIN"
+        ? { id }
+        : { id, organizationId: tenant.organizationId! },
     });
     if (!folder)
       return Response.json({ error: "Pasta não encontrada." }, { status: 404 });
+
+    const organizationId = folder.organizationId;
     const body = (await request.json()) as {
       action?: "rename" | "move" | "trash" | "restore";
       name?: string;
       parentId?: string | null;
     };
-    const { drive, rootFolderId } = await ensureDriveRoot(
-      tenant.organizationId!,
+    const { drive } = await ensureDriveRoot(
+      organizationId,
       "Documentos",
     );
     let action = "FOLDER_UPDATED";
     if (body.action === "rename") {
       const name = cleanName(body.name ?? "");
-      await drive.update(folder.storageFolderId!, { name });
+      if (folder.storageFolderId) {
+        try {
+          await drive.update(folder.storageFolderId, { name });
+        } catch {}
+      }
       await prisma.folder.update({ where: { id }, data: { name } });
       action = "FOLDER_RENAME";
     } else if (body.action === "move") {
-      const target = await assertFolder(tenant.organizationId!, body.parentId);
-      if (target && (await isDescendant(tenant.organizationId!, target.id, id)))
+      const target = await assertFolder(organizationId, body.parentId);
+      if (target && (await isDescendant(organizationId, target.id, id)))
         throw new Error(
           "Uma pasta não pode ser movida para dentro dela mesma.",
         );
       const current = folder.parentId
         ? await prisma.folder.findUnique({ where: { id: folder.parentId } })
         : null;
-      await drive.update(folder.storageFolderId!, {
-        addParent: target?.storageFolderId ?? rootFolderId,
-        removeParent: current?.storageFolderId ?? rootFolderId,
-      });
+      if (folder.storageFolderId) {
+        try {
+          const updatePayload: { addParent?: string; removeParent?: string } = {};
+          if (target?.storageFolderId) updatePayload.addParent = target.storageFolderId;
+          if (current?.storageFolderId) updatePayload.removeParent = current.storageFolderId;
+          if (Object.keys(updatePayload).length > 0) {
+            await drive.update(folder.storageFolderId, updatePayload);
+          }
+        } catch {}
+      }
       await prisma.folder.update({
         where: { id },
-        data: { parentId: target?.id ?? null },
+        data: {
+          parentId: target?.id ?? null,
+          sectorId: target?.sectorId ?? folder.sectorId,
+          storageSpaceId: target?.storageSpaceId ?? folder.storageSpaceId,
+        },
       });
       action = "FOLDER_MOVE";
     } else if (body.action === "trash") {
-      await drive.update(folder.storageFolderId!, { trashed: true });
+      if (folder.storageFolderId) {
+        try {
+          await drive.update(folder.storageFolderId, { trashed: true });
+        } catch {}
+      }
       await prisma.folder.update({
         where: { id },
         data: { previousParentId: folder.parentId, deletedAt: new Date() },
@@ -58,10 +80,14 @@ export async function PATCH(
       action = "FOLDER_DELETE";
     } else if (body.action === "restore") {
       const previous = await assertFolder(
-        tenant.organizationId!,
+        organizationId,
         folder.previousParentId,
       ).catch(() => null);
-      await drive.update(folder.storageFolderId!, { trashed: false });
+      if (folder.storageFolderId) {
+        try {
+          await drive.update(folder.storageFolderId, { trashed: false });
+        } catch {}
+      }
       await prisma.folder.update({
         where: { id },
         data: {
@@ -72,8 +98,9 @@ export async function PATCH(
       });
       action = "FOLDER_RESTORE";
     } else throw new Error("Ação inválida.");
+
     await writeAudit({
-      organizationId: tenant.organizationId,
+      organizationId,
       userId: tenant.userId,
       action,
       resourceType: "Folder",

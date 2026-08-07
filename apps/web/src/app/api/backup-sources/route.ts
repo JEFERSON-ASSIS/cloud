@@ -47,10 +47,15 @@ const createSourceSchema = z.object({
   }
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const tenant = await requireTenant("backup.read");
-    const organizationId = tenant.organizationId!;
+    const url = new URL(request.url);
+    const paramOrgId = url.searchParams.get("organizationId");
+    const organizationId =
+      tenant.role === "SUPER_ADMIN" && paramOrgId
+        ? paramOrgId
+        : tenant.organizationId!;
     const allowedSectorIds = await getUserSectorIds(tenant.userId, organizationId, tenant.role);
 
     const whereClause: any = { organizationId, deletedAt: null };

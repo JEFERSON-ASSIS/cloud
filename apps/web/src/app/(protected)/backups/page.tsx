@@ -110,11 +110,14 @@ export default function BackupsPage() {
   const loadData = async (showProgress = true) => {
     if (showProgress) setLoading(true);
     try {
+      const activeOrgId = localStorage.getItem("active-org-id") || "";
+      const queryParam = activeOrgId ? `?organizationId=${activeOrgId}` : "";
+
       const [resServers, resSectors, resSources, resRuns] = await Promise.all([
-        fetch("/api/servers"),
-        fetch("/api/sectors"),
-        fetch("/api/backup-sources"),
-        fetch("/api/backup-runs"),
+        fetch(`/api/servers${queryParam}`),
+        fetch(`/api/sectors${queryParam}`),
+        fetch(`/api/backup-sources${queryParam}`),
+        fetch(`/api/backup-runs${queryParam}`),
       ]);
       const dataServers = await resServers.json();
       const dataSectors = await resSectors.json();
@@ -124,7 +127,7 @@ export default function BackupsPage() {
       if (resServers.ok) setServers(dataServers);
       if (resSectors.ok && Array.isArray(dataSectors)) {
         setSectors(dataSectors);
-        if (dataSectors.length > 0 && !sectorId) {
+        if (dataSectors.length > 0) {
           setSectorId(dataSectors[0].id);
         }
       }
@@ -138,8 +141,10 @@ export default function BackupsPage() {
   };
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadData(false);
+    const handleOrgChange = () => void loadData(true);
+    window.addEventListener("active-org-changed", handleOrgChange);
+    return () => window.removeEventListener("active-org-changed", handleOrgChange);
   }, []);
 
   // Polling para acompanhar execução de backup em tempo real

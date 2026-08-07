@@ -15,10 +15,15 @@ const createServerSchema = z.object({
   privateKey: z.string().nullable().optional(),
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const tenant = await requireTenant("backup.read");
-    const organizationId = tenant.organizationId!;
+    const url = new URL(request.url);
+    const paramOrgId = url.searchParams.get("organizationId");
+    const organizationId =
+      tenant.role === "SUPER_ADMIN" && paramOrgId
+        ? paramOrgId
+        : tenant.organizationId!;
 
     const servers = await prisma.server.findMany({
       where: { organizationId, deletedAt: null },

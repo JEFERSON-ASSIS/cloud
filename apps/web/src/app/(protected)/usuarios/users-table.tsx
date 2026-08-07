@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { GridColDef } from "@mui/x-data-grid";
 import {
   Alert,
@@ -63,6 +63,24 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
   const [editingUser, setEditingUser] = useState<Row | null>(null);
   const [deletingUser, setDeletingUser] = useState<Row | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+
+  const fetchUsers = useCallback(async () => {
+    try {
+      const activeOrgId = localStorage.getItem("active-org-id");
+      const url = activeOrgId ? `/api/users?organizationId=${activeOrgId}` : "/api/users";
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setRows(data);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    void fetchUsers();
+    window.addEventListener("active-org-changed", fetchUsers);
+    return () => window.removeEventListener("active-org-changed", fetchUsers);
+  }, [fetchUsers]);
 
   // Form states (Create / Edit)
   const [formName, setFormName] = useState("");

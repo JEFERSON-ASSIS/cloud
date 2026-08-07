@@ -81,16 +81,28 @@ export default function FoldersPage() {
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    fetch("/api/files?allFolders=1")
-      .then(async (response) => {
-        const body = await response.json();
-        if (!response.ok) throw new Error(body.error);
-        setFolders(body.folders);
-      })
-      .catch((cause: unknown) =>
-        setError(cause instanceof Error ? cause.message : "Erro ao carregar pastas.")
-      )
-      .finally(() => setLoading(false));
+    const loadFolders = () => {
+      setLoading(true);
+      const activeOrgId = localStorage.getItem("active-org-id") || "";
+      const url = activeOrgId
+        ? `/api/files?allFolders=1&organizationId=${activeOrgId}`
+        : "/api/files?allFolders=1";
+
+      fetch(url)
+        .then(async (response) => {
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.error);
+          setFolders(body.folders || []);
+        })
+        .catch((cause: unknown) =>
+          setError(cause instanceof Error ? cause.message : "Erro ao carregar pastas.")
+        )
+        .finally(() => setLoading(false));
+    };
+
+    loadFolders();
+    window.addEventListener("active-org-changed", loadFolders);
+    return () => window.removeEventListener("active-org-changed", loadFolders);
   }, []);
 
   const paths = useMemo(() => {

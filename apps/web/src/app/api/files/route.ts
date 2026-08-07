@@ -13,7 +13,11 @@ export async function GET(request: Request) {
     const allFolders = url.searchParams.get("allFolders") === "1";
     const sectorId = url.searchParams.get("sectorId");
     const storageSpaceId = url.searchParams.get("storageSpaceId");
-    const organizationId = tenant.organizationId!;
+    const paramOrgId = url.searchParams.get("organizationId");
+    const organizationId =
+      tenant.role === "SUPER_ADMIN" && paramOrgId
+        ? paramOrgId
+        : tenant.organizationId!;
 
     const isPrivileged = tenant.role === "SUPER_ADMIN" || tenant.role === "ADMIN";
     let isReadOnly = false;
@@ -49,6 +53,34 @@ export async function GET(request: Request) {
       : !isPrivileged
       ? { sectorId: { in: userSectorIds } }
       : {};
+
+    // Sincronizar pastas das secretarias da organizacao para aparecerem na raiz de /arquivos e /pastas
+    if (!folderId && !trash && !search) {
+      const sectorsForOrg = await prisma.sector.findMany({
+        where: { organizationId, deletedAt: null },
+        include: { storageSpaces: { where: { deletedAt: null } } },
+      });
+
+      for (const sec of sectorsForOrg) {
+        const existingFolder = await prisma.folder.findFirst({
+          where: { organizationId, sectorId: sec.id, parentId: null },
+        });
+        if (!existingFolder) {
+          const space = sec.storageSpaces[0];
+          await prisma.folder.create({
+            data: {
+              organizationId,
+              sectorId: sec.id,
+              storageSpaceId: space?.id || null,
+              name: sec.name,
+              storageFolderId: space?.rootFolderId || null,
+              createdById: tenant.userId,
+              parentId: null,
+            },
+          });
+        }
+      }
+    }
 
     const [folders, documents, breadcrumbs] = await Promise.all([
       prisma.folder.findMany({
