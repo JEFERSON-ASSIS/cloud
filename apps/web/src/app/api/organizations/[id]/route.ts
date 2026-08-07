@@ -65,7 +65,7 @@ export async function DELETE(
 
     const org = await prisma.organization.findUniqueOrThrow({ where: { id } });
 
-    // Tentar deletar a pasta inteira da Empresa no Google Drive para nao deixar lixo
+    // Tentar deletar as pastas exatas da Empresa e Secretarias no Google Drive pelo ID do banco
     try {
       const connection = await prisma.storageConnection.findFirst({
         where: { provider: "GOOGLE_DRIVE", status: "CONNECTED", deletedAt: null },
@@ -75,10 +75,27 @@ export async function DELETE(
       if (connection?.googleDrive) {
         const accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
         const drive = new GoogleDriveStorageProvider(accessToken);
+
+        // 1. Deletar por ID exato das pastas das Secretarias registradas no banco
+        const storageSpaces = await prisma.storageSpace.findMany({
+          where: { organizationId: id, deletedAt: null },
+        });
+
+        for (const space of storageSpaces) {
+          if (space.rootFolderId) {
+            try {
+              await drive.delete(space.rootFolderId);
+            } catch {}
+          }
+        }
+
+        // 2. Deletar por ID exato ou fallback pelo nome exato da pasta da Empresa
         const rootItems = await drive.list("root");
         const matchingFolders = rootItems.filter((i) => i.name === org.name);
         for (const folder of matchingFolders) {
-          await drive.delete(folder.id);
+          try {
+            await drive.delete(folder.id);
+          } catch {}
         }
       }
     } catch (errDrive) {
