@@ -27,6 +27,7 @@ export async function GET() {
       organizations.map((item) => ({
         ...item,
         storageLimit: item.storageLimit.toString(),
+        maxUploadFileSize: item.maxUploadFileSize.toString(),
         documents: item.documents.map(doc => ({
           ...doc,
           size: doc.size.toString()
@@ -104,6 +105,7 @@ export async function POST(req: Request) {
     return Response.json({
       ...newOrg,
       storageLimit: newOrg.storageLimit.toString(),
+      maxUploadFileSize: newOrg.maxUploadFileSize.toString(),
     });
   } catch (error) {
     return Response.json(

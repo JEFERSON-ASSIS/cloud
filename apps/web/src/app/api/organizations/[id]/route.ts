@@ -41,6 +41,7 @@ export async function PATCH(
     return Response.json({
       ...updated,
       storageLimit: updated.storageLimit.toString(),
+      maxUploadFileSize: updated.maxUploadFileSize.toString(),
     });
   } catch (error) {
     return Response.json(
