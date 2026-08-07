@@ -491,7 +491,26 @@ const backupWorker = new Worker(
       const drive = new GoogleDriveStorageProvider(accessToken);
       const filename = `${source.name.toLowerCase().replace(/\s+/g, "-")}-${new Date().toISOString().split("T")[0]}-${Date.now()}.sql.gz.enc`;
       
-      let targetDriveFolderId: string | undefined = connection.googleDrive.rootFolderId || undefined;
+      let mainOrgFolderId: string | undefined = connection.googleDrive.rootFolderId || undefined;
+
+      // Se nao existir rootFolderId da organizacao no Google Drive, cria/localiza a pasta da Organizacao
+      if (!mainOrgFolderId) {
+        const orgObj = await prisma.organization.findUnique({ where: { id: organizationId } });
+        const orgName = orgObj?.name || "i7AI Cloud Backups";
+        const rootItems = await drive.list("root");
+        const existingOrgFolder = rootItems.find((i) => i.name === orgName);
+        if (existingOrgFolder) {
+          mainOrgFolderId = existingOrgFolder.id;
+        } else {
+          mainOrgFolderId = await drive.createFolder(orgName);
+        }
+        await prisma.googleDriveConnection.update({
+          where: { id: connection.googleDrive.id },
+          data: { rootFolderId: mainOrgFolderId },
+        });
+      }
+
+      let targetDriveFolderId: string | undefined = mainOrgFolderId;
       const runSectorId = run.sectorId || source.sectorId;
 
       if (runSectorId) {
@@ -502,8 +521,15 @@ const backupWorker = new Worker(
           });
 
           let sectorDriveFolderId = storageSpace?.rootFolderId;
-          if (!sectorDriveFolderId && connection.googleDrive.rootFolderId) {
-            sectorDriveFolderId = await drive.createFolder(sectorObj.name, connection.googleDrive.rootFolderId);
+          if (!sectorDriveFolderId) {
+            const orgItems = await drive.list(mainOrgFolderId || "root");
+            const existingSectorFolder = orgItems.find((i) => i.name === sectorObj.name);
+            if (existingSectorFolder) {
+              sectorDriveFolderId = existingSectorFolder.id;
+            } else {
+              sectorDriveFolderId = await drive.createFolder(sectorObj.name, mainOrgFolderId);
+            }
+
             if (storageSpace) {
               await prisma.storageSpace.update({
                 where: { id: storageSpace.id },
@@ -522,8 +548,8 @@ const backupWorker = new Worker(
           }
 
           if (sectorDriveFolderId) {
-            const existingItems = await drive.list(sectorDriveFolderId);
-            const existingBackupsFolder = existingItems.find((i) => i.name === "Backups");
+            const sectorItems = await drive.list(sectorDriveFolderId);
+            const existingBackupsFolder = sectorItems.find((i) => i.name === "Backups");
             if (existingBackupsFolder) {
               targetDriveFolderId = existingBackupsFolder.id;
             } else {
