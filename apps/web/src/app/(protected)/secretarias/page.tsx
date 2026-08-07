@@ -43,6 +43,8 @@ type Sector = {
   id: string;
   name: string;
   quotaLimit: string;
+  documentCount?: number;
+  memberCount?: number;
   _count: {
     users: number;
     storageSpaces: number;
@@ -313,9 +315,9 @@ export default function SecretariasPage() {
 
   const deletingSector = sectors.find((s) => s.id === deletingId);
 
-  const totalDocs = sectors.reduce((a, s) => a + s._count.documents, 0);
-  const totalUsers = sectors.reduce((a, s) => a + s._count.users, 0);
-  const totalQuota = sectors.reduce((a, s) => a + Number(s.quotaLimit), 0);
+  const totalDocs = sectors.reduce((a, s) => a + (s.documentCount ?? s._count?.documents ?? 0), 0);
+  const totalUsers = sectors.reduce((a, s) => a + (s.memberCount ?? s._count?.users ?? 0), 0);
+  const totalQuota = sectors.reduce((a, s) => a + Number(s.quotaLimit || 0), 0);
 
   // Filtrar usuários da organização que ainda não são membros desta secretaria
   const availableUsers = orgUsers.filter(

@@ -43,6 +43,8 @@ type Row = {
   role: string;
   status: string;
   lastLoginAt: string | null;
+  organizationName?: string;
+  sectors?: Array<{ id: string; name: string }>;
 };
 
 function getInitials(name: string) {
@@ -237,6 +239,31 @@ export function UsersTable({ rows: initialRows }: { rows: Row[] }) {
           </Box>
         </Stack>
       ),
+    },
+    {
+      field: "organizationName",
+      headerName: "Empresa / Prefeitura",
+      width: 200,
+      valueGetter: (_v, row) => row.organizationName ?? "Geral Master",
+    },
+    {
+      field: "sectors",
+      headerName: "Secretaria(s) Atrelada(s)",
+      minWidth: 200,
+      flex: 1,
+      renderCell: ({ row }) => {
+        const secs = row.sectors || [];
+        if (secs.length === 0) {
+          return <Chip label="Acesso Geral / Todas" size="small" variant="outlined" sx={{ fontSize: 10, color: "text.secondary" }} />;
+        }
+        return (
+          <Stack direction="row" spacing={0.5} sx={{ alignItems: "center", flexWrap: "wrap", py: 0.5 }}>
+            {secs.map((s) => (
+              <Chip key={s.id} label={s.name} size="small" color="primary" sx={{ fontSize: 10, height: 22, fontWeight: 600 }} />
+            ))}
+          </Stack>
+        );
+      },
     },
     {
       field: "role",
