@@ -784,8 +784,28 @@ function scheduleFingerprint(schedule: {
   return `${schedule.frequency}|${schedule.time}|${schedule.timezone || "America/Cuiaba"}|${sourceIds}`;
 }
 
+function formatInTimezone(date: Date, timeZone: string): string {
+  try {
+    return date.toLocaleString("pt-BR", {
+      timeZone,
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  } catch {
+    return date.toISOString();
+  }
+}
+
 async function syncScheduler() {
-  console.info("[Scheduler] Sincronizando agendamentos ativos...");
+  const now = new Date();
+  console.info(
+    `[Scheduler] Sincronizando agendamentos ativos... agoraUTC=${now.toISOString()} agoraCuiaba=${formatInTimezone(now, "America/Cuiaba")} jobsEmMemoria=${activeCronJobs.size}`,
+  );
   try {
     const schedules = await prisma.backupSchedule.findMany({
       where: { active: true },
@@ -796,11 +816,13 @@ async function syncScheduler() {
       },
     });
 
+    console.info(`[Scheduler] Encontrados ${schedules.length} agendamento(s) ativo(s) no banco.`);
+
     // Remover jobs que foram desativados ou cuja configuração mudou
     for (const [id, entry] of activeCronJobs.entries()) {
       const still = schedules.find((s: { id: string }) => s.id === id);
       if (!still || entry.fingerprint !== scheduleFingerprint(still)) {
-        entry.task.stop();
+        entry.task.destroy();
         activeCronJobs.delete(id);
         console.info(`[Scheduler] Agendamento ${id} removido${still ? " para recriação" : ""}.`);
       }
@@ -808,9 +830,23 @@ async function syncScheduler() {
 
     // Adicionar/atualizar jobs
     for (const schedule of schedules) {
-      if (activeCronJobs.has(schedule.id)) continue;
-
+      const timezone = schedule.timezone || "America/Cuiaba";
       const expression = freqToCronExpression(schedule.frequency, schedule.time);
+      const sourceNames = schedule.sources.map((item) => item.source.name).join(", ") || "(nenhuma)";
+
+      if (activeCronJobs.has(schedule.id)) {
+        const entry = activeCronJobs.get(schedule.id)!;
+        const nextRun =
+          typeof entry.task.getNextRun === "function" ? entry.task.getNextRun() : null;
+        console.info(
+          `[Scheduler] Já ativo: ${schedule.name} | cron=${expression} | tz=${timezone} | horario=${schedule.time} | origens=${sourceNames}` +
+            (nextRun
+              ? ` | proximoUTC=${nextRun.toISOString()} | proximoLocal=${formatInTimezone(nextRun, timezone)}`
+              : " | proximo=(indisponivel)"),
+        );
+        continue;
+      }
+
       if (!cron.validate(expression)) {
         console.warn(`[Scheduler] Expressão cron inválida para ${schedule.name}: ${expression}`);
         continue;
@@ -819,9 +855,16 @@ async function syncScheduler() {
       const fingerprint = scheduleFingerprint(schedule);
       const task = cron.schedule(expression, async () => {
         console.info(`[Scheduler] Disparando backup agendado: ${schedule.name}`);
+        if (!schedule.sources.length) {
+          console.warn(`[Scheduler] Agendamento ${schedule.name} sem origens vinculadas — nada a enfileirar.`);
+          return;
+        }
         for (const scheduleSource of schedule.sources) {
           const source = scheduleSource.source;
-          if (!source.active || source.deletedAt) continue;
+          if (!source.active || source.deletedAt) {
+            console.warn(`[Scheduler] Origem ${source.name} inativa/removida — ignorada.`);
+            continue;
+          }
 
           if (source.organizationId !== schedule.organizationId) {
             console.error(`[Scheduler] Rejeitado: Organização da Origem (${source.organizationId}) difere do Agendamento (${schedule.organizationId}).`);
@@ -870,19 +913,39 @@ async function syncScheduler() {
           }
         }
       }, {
-        timezone: schedule.timezone || "America/Cuiaba",
+        name: `backup-schedule:${schedule.id}`,
+        timezone,
+        // Em Docker o timer pode atrasar alguns segundos; default do node-cron (1s) perde o disparo diário.
+        missedExecutionTolerance: 10 * 60_000,
       });
 
+      task.on("execution:missed", () => {
+        console.warn(
+          `[Scheduler] Execução PERDIDA para "${schedule.name}" (${expression} ${timezone}). ` +
+            "O horário passou sem o worker conseguir disparar a tempo.",
+        );
+      });
+
+      const nextRun = typeof task.getNextRun === "function" ? task.getNextRun() : null;
       activeCronJobs.set(schedule.id, { task, fingerprint });
-      console.info(`[Scheduler] Agendamento ativo: ${schedule.name} (${expression}) timezone=${schedule.timezone}`);
+      console.info(
+        `[Scheduler] Registrado: ${schedule.name} | cron=${expression} | tz=${timezone} | horario=${schedule.time} | origens=${sourceNames}` +
+          (nextRun
+            ? ` | proximoUTC=${nextRun.toISOString()} | proximoLocal=${formatInTimezone(nextRun, timezone)}`
+            : ""),
+      );
     }
   } catch (err) {
     console.error("[Scheduler] Erro ao sincronizar agendamentos:", err);
   }
 }
 
-// Sincronizar imediatamente e depois a cada 5 minutos
+// Sincronizar imediatamente e depois a cada 1 minuto (mudanças de horário entram mais rápido)
 void syncScheduler();
-cron.schedule("*/5 * * * *", () => { void syncScheduler(); });
+cron.schedule("* * * * *", () => { void syncScheduler(); }, {
+  name: "backup-scheduler-sync",
+  timezone: "America/Cuiaba",
+  missedExecutionTolerance: 30_000,
+});
 
-console.info("[Scheduler] Sistema de agendamentos iniciado (sincroniza a cada 5 minutos).");
+console.info("[Scheduler] Sistema de agendamentos iniciado (sincroniza a cada 1 minuto).");
