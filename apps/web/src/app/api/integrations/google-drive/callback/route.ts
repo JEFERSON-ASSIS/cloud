@@ -18,11 +18,23 @@ export async function GET(request: Request) {
     if (!code || !stateValue || !session?.user?.id)
       throw new Error("Resposta OAuth inválida.");
     const state = verifyOAuthState(stateValue);
-    if (
-      state.userId !== session.user.id ||
-      state.organizationId !== session.user.organizationId
-    )
+    if (state.userId !== session.user.id) {
       throw new Error("A autorização não pertence à sessão atual.");
+    }
+    // SUPER_ADMIN pode conectar para a empresa ativa (≠ organizationId do JWT).
+    if (
+      session.user.role !== "SUPER_ADMIN" &&
+      state.organizationId !== session.user.organizationId
+    ) {
+      throw new Error("A autorização não pertence à empresa da sessão.");
+    }
+    if (session.user.role === "SUPER_ADMIN") {
+      const membership = await prisma.organization.findFirst({
+        where: { id: state.organizationId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!membership) throw new Error("Empresa da autorização não encontrada.");
+    }
     const tokens = await exchangeGoogleCode(code);
     const profileResponse = await fetch(
       "https://www.googleapis.com/oauth2/v2/userinfo",

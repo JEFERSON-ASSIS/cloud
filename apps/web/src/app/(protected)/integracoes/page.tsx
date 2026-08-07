@@ -1,6 +1,7 @@
 "use client";
 import { tenantFetch } from "@/lib/tenant-fetch";
 import { storageProviderLabel } from "@/lib/storage-branding";
+import { useActiveTenant } from "@/components/AppShell/ActiveTenantContext";
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
@@ -45,6 +46,7 @@ type S3Connection = {
 export default function IntegrationsPage() {
   const query = useSearchParams();
   const { data: session } = useSession();
+  const { activeOrganizationId } = useActiveTenant();
   const providerLabel = storageProviderLabel(session?.user?.role);
   const [connection, setConnection] = useState<Connection>(null);
   const [s3Conn, setS3Conn] = useState<S3Connection>(null);
@@ -73,11 +75,26 @@ export default function IntegrationsPage() {
     setLoading(true);
     try {
       const [resDrive, resS3] = await Promise.all([
-        tenantFetch("/api/integrations/google-drive"),
-        tenantFetch("/api/integrations/s3"),
+        tenantFetch("/api/integrations/google-drive", {}, activeOrganizationId),
+        tenantFetch("/api/integrations/s3", {}, activeOrganizationId),
       ]);
-      setConnection(resDrive.ok ? await resDrive.json() : null);
-      setS3Conn(resS3.ok ? await resS3.json() : null);
+      const driveBody = resDrive.ok
+        ? ((await resDrive.json()) as Connection | { error?: string })
+        : null;
+      const s3Body = resS3.ok
+        ? ((await resS3.json()) as S3Connection | { error?: string })
+        : null;
+      const driveConn =
+        driveBody && "status" in driveBody ? (driveBody as Connection) : null;
+      const s3Connection =
+        s3Body && "status" in s3Body ? (s3Body as S3Connection) : null;
+      setConnection(driveConn);
+      setS3Conn(s3Connection);
+      if (query.get("connected") && driveConn?.status !== "CONNECTED") {
+        setMessage(
+          "OAuth concluído, mas a conexão não apareceu para a empresa selecionada. Confira a empresa ativa no topo e tente novamente.",
+        );
+      }
     } catch {
       // ignore
     } finally {
@@ -87,7 +104,7 @@ export default function IntegrationsPage() {
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [activeOrganizationId]);
 
   const test = async () => {
     setLoading(true);
@@ -261,7 +278,11 @@ export default function IntegrationsPage() {
               ) : (
                 <Button
                   variant="contained"
-                  href="/api/integrations/google-drive/connect"
+                  href={
+                    activeOrganizationId
+                      ? `/api/integrations/google-drive/connect?organizationId=${encodeURIComponent(activeOrganizationId)}`
+                      : "/api/integrations/google-drive/connect"
+                  }
                 >
                   Conectar {providerLabel}
                 </Button>
