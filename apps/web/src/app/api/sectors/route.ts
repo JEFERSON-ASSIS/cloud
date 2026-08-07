@@ -3,10 +3,19 @@ import { requireTenant } from "@/server/tenant";
 import { decryptSecret } from "@/server/encryption";
 import { GoogleDriveStorageProvider } from "@i7ai/storage";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const tenant = await requireTenant("document.read");
-    const organizationId = tenant.organizationId!;
+    const url = new URL(request.url);
+    const paramOrgId = url.searchParams.get("organizationId");
+
+    const organizationId = (tenant.role === "SUPER_ADMIN" && paramOrgId)
+      ? paramOrgId
+      : tenant.organizationId;
+
+    if (!organizationId) {
+      return Response.json([], { status: 200 });
+    }
 
     const sectors = await prisma.sector.findMany({
       where: {
@@ -42,12 +51,19 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const tenant = await requireTenant("user.manage");
-    const organizationId = tenant.organizationId!;
-
     const body = (await request.json()) as {
       name?: string;
       quotaLimit?: number | string;
+      organizationId?: string;
     };
+
+    const organizationId = (tenant.role === "SUPER_ADMIN" && body.organizationId)
+      ? body.organizationId
+      : tenant.organizationId;
+
+    if (!organizationId) {
+      return Response.json({ error: "Empresa/Prefeitura é obrigatória." }, { status: 400 });
+    }
 
     const name = body.name?.trim();
     if (!name) {

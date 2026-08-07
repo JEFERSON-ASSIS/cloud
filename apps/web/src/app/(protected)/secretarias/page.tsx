@@ -123,8 +123,15 @@ function SectorCardSkeleton() {
   );
 }
 
+type OrgOption = {
+  id: string;
+  name: string;
+};
+
 export default function SecretariasPage() {
   const [sectors, setSectors] = useState<Sector[]>([]);
+  const [organizations, setOrganizations] = useState<OrgOption[]>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -147,13 +154,29 @@ export default function SecretariasPage() {
   const [savingMember, setSavingMember] = useState(false);
   const [memberModalError, setMemberModalError] = useState("");
 
-  const loadSectors = async (showProgress = true) => {
+  const loadSectors = async (showProgress = true, overrideOrgId?: string) => {
     if (showProgress) setLoading(true);
     try {
-      const res = await fetch("/api/sectors");
-      const data = await res.json();
-      if (res.ok) setSectors(data);
-      else setError(data.error || "Falha ao carregar secretarias.");
+      const activeOrgId = overrideOrgId !== undefined ? overrideOrgId : selectedOrgId;
+      const sectorsUrl = activeOrgId ? `/api/sectors?organizationId=${activeOrgId}` : "/api/sectors";
+
+      const [resSectors, resOrgs] = await Promise.all([
+        fetch(sectorsUrl),
+        fetch("/api/organizations"),
+      ]);
+
+      const dataSectors = await resSectors.json();
+      const dataOrgs = await resOrgs.json();
+
+      if (resSectors.ok) setSectors(dataSectors);
+      else setError(dataSectors.error || "Falha ao carregar secretarias.");
+
+      if (resOrgs.ok && Array.isArray(dataOrgs)) {
+        setOrganizations(dataOrgs);
+        if (dataOrgs.length > 0 && !activeOrgId) {
+          setSelectedOrgId(dataOrgs[0].id);
+        }
+      }
     } catch {
       setError("Erro de rede.");
     } finally {
@@ -174,7 +197,11 @@ export default function SecretariasPage() {
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: sectorName, quotaLimit: bytes.toString() }),
+        body: JSON.stringify({
+          name: sectorName,
+          quotaLimit: bytes.toString(),
+          organizationId: selectedOrgId || undefined,
+        }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -618,6 +645,27 @@ export default function SecretariasPage() {
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2.5} sx={{ mt: 1 }}>
+            {organizations.length > 0 && (
+              <TextField
+                select
+                label="Empresa / Prefeitura"
+                fullWidth
+                value={selectedOrgId}
+                disabled={!!editingSector}
+                onChange={(e) => {
+                  const newOrgId = e.target.value;
+                  setSelectedOrgId(newOrgId);
+                  void loadSectors(false, newOrgId);
+                }}
+              >
+                {organizations.map((org) => (
+                  <MenuItem key={org.id} value={org.id}>
+                    {org.name}
+                  </MenuItem>
+                ))}
+              </TextField>
+            )}
+
             <TextField
               label="Nome da Secretaria"
               fullWidth
