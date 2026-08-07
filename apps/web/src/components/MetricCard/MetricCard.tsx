@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Card, CardContent, Stack, Typography, Box } from "@mui/material";
 export function MetricCard({
   label,
@@ -8,7 +9,7 @@ export function MetricCard({
   label: string;
   value: string | number;
   caption: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
 }) {
   return (
     <Card>

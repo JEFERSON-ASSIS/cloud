@@ -39,6 +39,23 @@ export default async function DashboardPage() {
   const tenant = await requireTenant("dashboard.read");
   const organizationId = tenant.organizationId!;
   const since = subDays(new Date(), 29);
+
+  const isPrivileged = tenant.role === "SUPER_ADMIN" || tenant.role === "ADMIN";
+
+  // Se o usuário não for ADMIN/SUPER_ADMIN, buscar as secretarias onde ele é membro
+  const userSectorIds = isPrivileged
+    ? []
+    : (
+        await prisma.sectorUser.findMany({
+          where: { userId: tenant.userId },
+          select: { sectorId: true },
+        })
+      ).map((s) => s.sectorId);
+
+  const documentWhere = isPrivileged
+    ? { organizationId, deletedAt: null }
+    : { organizationId, deletedAt: null, sectorId: { in: userSectorIds } };
+
   const [
     documents,
     storage,
@@ -51,9 +68,9 @@ export default async function DashboardPage() {
     driveConnection,
     sectors,
   ] = await Promise.all([
-    prisma.document.count({ where: { organizationId, deletedAt: null } }),
+    prisma.document.count({ where: documentWhere }),
     prisma.document.aggregate({
-      where: { organizationId, deletedAt: null },
+      where: documentWhere,
       _sum: { size: true },
     }),
     prisma.backupRun.count({ where: { organizationId } }),
@@ -65,12 +82,14 @@ export default async function DashboardPage() {
       where: { organizationId, status: "CONNECTED", deletedAt: null },
     }),
     prisma.auditLog.findMany({
-      where: { organizationId },
+      where: isPrivileged ? { organizationId } : { organizationId, userId: tenant.userId },
       take: 6,
       orderBy: { createdAt: "desc" },
     }),
     prisma.auditLog.findMany({
-      where: { organizationId, createdAt: { gte: since } },
+      where: isPrivileged
+        ? { organizationId, createdAt: { gte: since } }
+        : { organizationId, userId: tenant.userId, createdAt: { gte: since } },
       select: { createdAt: true },
       orderBy: { createdAt: "asc" },
     }),
@@ -85,7 +104,9 @@ export default async function DashboardPage() {
       select: { quotaUsed: true, quotaLimit: true },
     }),
     prisma.sector.findMany({
-      where: { organizationId, deletedAt: null },
+      where: isPrivileged
+        ? { organizationId, deletedAt: null }
+        : { organizationId, deletedAt: null, id: { in: userSectorIds } },
       include: {
         documents: {
           where: { deletedAt: null, status: "AVAILABLE" },
@@ -129,9 +150,7 @@ export default async function DashboardPage() {
     [
       "Armazenamento usado",
       `${(storageBytes / 1_073_741_824).toFixed(2)} GB`,
-      driveConnection?.quotaUsed != null
-        ? `Google Drive${quotaBytes ? ` · ${((storageBytes / quotaBytes) * 100).toFixed(1)}% da quota` : ""}`
-        : "Documentos gerenciados",
+      quotaBytes ? `${((storageBytes / quotaBytes) * 100).toFixed(1)}% da cota contratada` : "Nuvem segura i7AI",
       <CloudOutlined key="2" />,
     ],
     [

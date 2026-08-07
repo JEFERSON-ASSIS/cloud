@@ -26,7 +26,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Notifications, Add, Delete, Send, Refresh } from "@mui/icons-material";
+import { Notifications, Add, Delete, Send, Email, Lock } from "@mui/icons-material";
 
 interface NotificationItem {
   id: string;
@@ -48,6 +48,14 @@ export function NotificationsClient() {
   const [channel, setChannel] = useState("DISCORD");
   const [url, setUrl] = useState("");
   const [email, setEmail] = useState("");
+  
+  // SMTP Fields
+  const [smtpHost, setSmtpHost] = useState("");
+  const [smtpPort, setSmtpPort] = useState("587");
+  const [smtpUser, setSmtpUser] = useState("");
+  const [smtpPass, setSmtpPass] = useState("");
+  const [smtpSecure, setSmtpSecure] = useState(true);
+
   const [eventSuccess, setEventSuccess] = useState(true);
   const [eventFailed, setEventFailed] = useState(true);
 
@@ -76,7 +84,19 @@ export function NotificationsClient() {
     if (eventSuccess) events.push("SUCCESS");
     if (eventFailed) events.push("FAILED");
 
-    const config = channel === "EMAIL" ? { toEmail: email } : { url };
+    let config: Record<string, any> = {};
+    if (channel === "EMAIL") {
+      config = {
+        toEmail: email,
+        smtpHost,
+        smtpPort,
+        smtpUser,
+        smtpPass,
+        smtpSecure,
+      };
+    } else {
+      config = { url };
+    }
 
     try {
       const res = await fetch("/api/notifications", {
@@ -100,6 +120,9 @@ export function NotificationsClient() {
       setOpenModal(false);
       setUrl("");
       setEmail("");
+      setSmtpHost("");
+      setSmtpUser("");
+      setSmtpPass("");
       void fetchNotifications();
     } catch (err) {
       setMsg({ text: err instanceof Error ? err.message : "Erro interno", severity: "error" });
@@ -142,7 +165,7 @@ export function NotificationsClient() {
       <CardHeader
         avatar={<Notifications color="primary" />}
         title={<Typography variant="h6">Notificações e Alertas</Typography>}
-        subheader="Configure Webhooks (Discord, Slack, HTTP) ou E-mail para ser avisado sobre o estado dos backups."
+        subheader="Configure Webhooks (Discord, Slack, HTTP) ou E-mail SMTP para ser avisado sobre o estado dos backups."
         action={
           <Stack direction="row" spacing={1}>
             <Button
@@ -175,7 +198,7 @@ export function NotificationsClient() {
           <Typography color="text.secondary">Carregando canais...</Typography>
         ) : items.length === 0 ? (
           <Alert severity="info">
-            Nenhum canal de notificação configurado ainda. Clique em "Novo Canal" para cadastrar um Discord Webhook ou E-mail.
+            Nenhum canal de notificação configurado ainda. Clique em "Novo Canal" para cadastrar um Discord Webhook ou E-mail com Servidor SMTP.
           </Alert>
         ) : (
           <Grid container spacing={2}>
@@ -207,6 +230,13 @@ export function NotificationsClient() {
                       <Delete fontSize="small" />
                     </IconButton>
                   </Stack>
+
+                  {item.channel === "EMAIL" && item.config.smtpHost && (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+                      SMTP: {item.config.smtpHost}:{item.config.smtpPort || "587"} ({item.config.smtpUser})
+                    </Typography>
+                  )}
+
                   <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
                     {item.events.includes("SUCCESS") && <Chip label="Sucesso ✅" size="small" color="success" variant="outlined" />}
                     {item.events.includes("FAILED") && <Chip label="Falhas ❌" size="small" color="error" variant="outlined" />}
@@ -228,18 +258,75 @@ export function NotificationsClient() {
                 <MenuItem value="DISCORD">Discord Webhook</MenuItem>
                 <MenuItem value="SLACK">Slack Webhook</MenuItem>
                 <MenuItem value="WEBHOOK">Webhook HTTP Genérico</MenuItem>
-                <MenuItem value="EMAIL">E-mail</MenuItem>
+                <MenuItem value="EMAIL">E-mail (SMTP Customizado)</MenuItem>
               </Select>
             </FormControl>
 
             {channel === "EMAIL" ? (
-              <TextField
-                label="E-mail de Destino"
-                placeholder="admin@empresa.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                fullWidth
-              />
+              <>
+                <TextField
+                  label="E-mail de Destino"
+                  placeholder="admin@empresa.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  fullWidth
+                  required
+                />
+
+                <Typography variant="subtitle2" sx={{ mt: 1, fontWeight: 700, display: "flex", alignItems: "center", gap: 0.5 }}>
+                  <Email fontSize="small" color="primary" /> Configurações do Servidor SMTP
+                </Typography>
+
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 8 }}>
+                    <TextField
+                      label="Servidor SMTP (Host)"
+                      placeholder="smtp.gmail.com ou smtp.empresa.com"
+                      value={smtpHost}
+                      onChange={(e) => setSmtpHost(e.target.value)}
+                      fullWidth
+                      required
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 4 }}>
+                    <TextField
+                      label="Porta"
+                      placeholder="587"
+                      value={smtpPort}
+                      onChange={(e) => setSmtpPort(e.target.value)}
+                      fullWidth
+                      required
+                    />
+                  </Grid>
+                </Grid>
+
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 6 }}>
+                    <TextField
+                      label="Usuário SMTP"
+                      placeholder="usuario@empresa.com"
+                      value={smtpUser}
+                      onChange={(e) => setSmtpUser(e.target.value)}
+                      fullWidth
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 6 }}>
+                    <TextField
+                      label="Senha SMTP"
+                      type="password"
+                      placeholder="••••••••"
+                      value={smtpPass}
+                      onChange={(e) => setSmtpPass(e.target.value)}
+                      fullWidth
+                    />
+                  </Grid>
+                </Grid>
+
+                <FormControlLabel
+                  control={<Switch checked={smtpSecure} onChange={(e) => setSmtpSecure(e.target.checked)} />}
+                  label="Usar conexão segura (SSL/TLS / STARTTLS)"
+                />
+              </>
             ) : (
               <TextField
                 label="URL do Webhook"

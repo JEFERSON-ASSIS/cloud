@@ -1,6 +1,7 @@
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
 import { NotificationsClient } from "./NotificationsClient";
+import { UploadLimitClient } from "./UploadLimitClient";
 import { Business, Cloud, Security } from "@mui/icons-material";
 import {
   Alert,
@@ -128,9 +129,10 @@ export default async function SettingsPage() {
           </Card>
         </Grid>
       </Grid>
+      <UploadLimitClient />
       <NotificationsClient />
       <Alert icon={<Security />} severity="info">
-        <strong>Segurança:</strong> tokens do Google Drive e configurações de notificação são criptografados,
+        <strong>Segurança:</strong> credenciais de armazenamento e configurações de notificação são criptografadas com chave AES-256,
         permissões são verificadas no servidor e todos os documentos e backups são
         isolados por empresa.
       </Alert>

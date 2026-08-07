@@ -26,6 +26,10 @@ export async function GET() {
       organizations.map((item) => ({
         ...item,
         storageLimit: item.storageLimit.toString(),
+        documents: item.documents.map(doc => ({
+          ...doc,
+          size: doc.size.toString()
+        }))
       }))
     );
   } catch (error) {

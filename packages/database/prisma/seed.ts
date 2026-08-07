@@ -17,7 +17,7 @@ const permissionKeys = [
 ];
 const rolePermissions: Record<string, string[]> = {
   SUPER_ADMIN: permissionKeys,
-  ADMIN: permissionKeys.filter((key) => key !== "organization.manage"),
+  ADMIN: permissionKeys,
   MANAGER: [
     "dashboard.read",
     "organization.read",

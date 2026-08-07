@@ -136,6 +136,9 @@ export default function OrganizationsPage() {
         );
         setOpenDialog(false);
         await loadOrganizations(false);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("organization-updated"));
+        }
       } else {
         setError(data.error || "Erro ao salvar empresa.");
       }

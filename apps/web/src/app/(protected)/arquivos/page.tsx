@@ -333,39 +333,46 @@ export default function FilesPage() {
           >
             {items.map((item) => (
               <Card key={`${item.kind}-${item.id}`} variant="outlined">
-                <CardActionArea
+                <Box
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    p: 1.5,
+                    cursor: "pointer",
+                    borderRadius: 1,
+                    "&:hover": { bgcolor: "action.hover" },
+                  }}
                   onDoubleClick={() =>
                     item.kind === "folder"
                       ? setFolderId(item.id)
                       : void action(item, "preview")
                   }
                 >
-                  <CardContent
-                    sx={{ display: "flex", alignItems: "center", gap: 2 }}
+                  {item.kind === "folder" ? (
+                    <Folder color="primary" sx={{ mr: 2 }} />
+                  ) : (
+                    <InsertDriveFile color="action" sx={{ mr: 2 }} />
+                  )}
+                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                    <Typography noWrap fontWeight={600} sx={{ fontSize: 14 }}>
+                      {item.name}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {item.kind === "folder"
+                        ? "Pasta"
+                        : `${(Number(item.size) / 1024).toFixed(1)} KB`}
+                    </Typography>
+                  </Box>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenu({ anchor: e.currentTarget, item });
+                    }}
                   >
-                    {item.kind === "folder" ? (
-                      <Folder color="primary" />
-                    ) : (
-                      <InsertDriveFile color="action" />
-                    )}
-                    <Box sx={{ minWidth: 0, flex: 1 }}>
-                      <Typography noWrap>{item.name}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {item.kind === "folder"
-                          ? "Pasta"
-                          : `${(Number(item.size) / 1024).toFixed(1)} KB`}
-                      </Typography>
-                    </Box>
-                    <IconButton
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setMenu({ anchor: e.currentTarget, item });
-                      }}
-                    >
-                      <MoreVert />
-                    </IconButton>
-                  </CardContent>
-                </CardActionArea>
+                    <MoreVert />
+                  </IconButton>
+                </Box>
               </Card>
             ))}
           </Box>

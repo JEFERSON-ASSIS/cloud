@@ -1,14 +1,17 @@
 "use client";
 
-import { useState, useEffect, type PropsWithChildren } from "react";
+import {
+  PropsWithChildren,
+  useEffect,
+  useState,
+} from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
-import { useColorScheme } from "@mui/material/styles";
 import {
   AppBar,
-  Avatar,
   Box,
+  CssBaseline,
   Divider,
   Drawer,
   IconButton,
@@ -17,12 +20,12 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
-  Menu,
   MenuItem,
   Select,
   Toolbar,
   Tooltip,
   Typography,
+  useColorScheme,
   useMediaQuery,
   useTheme,
 } from "@mui/material";
@@ -48,25 +51,40 @@ import {
   FolderCopyOutlined,
   Apartment,
 } from "@mui/icons-material";
+import type { ReactNode } from "react";
+import type { Permission } from "@i7ai/types";
 
 const expandedWidth = 264;
 const collapsedWidth = 76;
 
-const items = [
-  ["Dashboard", "/dashboard", <DashboardOutlined key="d" />],
-  ["Secretarias", "/secretarias", <Apartment key="sec" />],
-  ["Arquivos", "/arquivos", <FolderOutlined key="a" />],
-  ["Pastas", "/pastas", <FolderCopyOutlined key="p" />],
-  ["Backups", "/backups", <BackupOutlined key="b" />],
-  ["Agendamentos", "/agendamentos", <ScheduleOutlined key="ag" />],
-  ["Servidores", "/servidores", <DnsOutlined key="s" />],
-  ["Integrações", "/integracoes", <HubOutlined key="i" />],
-  ["Usuários", "/usuarios", <PeopleOutlined key="u" />],
-  ["Empresas", "/empresas", <BusinessOutlined key="e" />],
-  ["Auditoria", "/auditoria", <FactCheckOutlined key="au" />],
-  ["Logs", "/logs", <ReceiptLongOutlined key="l" />],
-  ["Configurações", "/configuracoes", <SettingsOutlined key="c" />],
-] as const;
+type MenuItemType = {
+  label: string;
+  href: string;
+  icon: ReactNode;
+  permission?: Permission;
+  superAdminOnly?: boolean;
+};
+
+const navItems: MenuItemType[] = [
+  { label: "Dashboard", href: "/dashboard", icon: <DashboardOutlined key="d" />, permission: "dashboard.read" },
+  { label: "Secretarias", href: "/secretarias", icon: <Apartment key="sec" />, permission: "organization.read" },
+  { label: "Arquivos", href: "/arquivos", icon: <FolderOutlined key="a" />, permission: "document.read" },
+  { label: "Pastas", href: "/pastas", icon: <FolderCopyOutlined key="p" />, permission: "document.read" },
+  { label: "Backups", href: "/backups", icon: <BackupOutlined key="b" />, permission: "backup.read" },
+  { label: "Agendamentos", href: "/agendamentos", icon: <ScheduleOutlined key="ag" />, permission: "backup.read" },
+  { label: "Servidores", href: "/servidores", icon: <DnsOutlined key="s" />, permission: "integration.manage" },
+  { label: "Integrações", href: "/integracoes", icon: <HubOutlined key="i" />, permission: "integration.manage" },
+  { label: "Usuários", href: "/usuarios", icon: <PeopleOutlined key="u" />, permission: "user.read" },
+  { label: "Empresas", href: "/empresas", icon: <BusinessOutlined key="e" />, permission: "organization.manage", superAdminOnly: true },
+  { label: "Auditoria", href: "/auditoria", icon: <FactCheckOutlined key="au" />, permission: "audit.read" },
+  { label: "Logs", href: "/logs", icon: <ReceiptLongOutlined key="l" />, permission: "audit.read" },
+  { label: "Configurações", href: "/configuracoes", icon: <SettingsOutlined key="c" />, permission: "organization.read" },
+];
+
+type OrganizationOption = {
+  id: string;
+  name: string;
+};
 
 export function AppShell({ children }: PropsWithChildren) {
   const theme = useTheme();
@@ -81,10 +99,50 @@ export function AppShell({ children }: PropsWithChildren) {
       typeof window !== "undefined" &&
       localStorage.getItem("sidebar-collapsed") === "true"
   );
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
 
   const [sectors, setSectors] = useState<{ id: string; name: string }[]>([]);
   const [activeSectorId, setActiveSectorId] = useState<string>("");
+
+  const [organizations, setOrganizations] = useState<OrganizationOption[]>([]);
+  const [activeOrgId, setActiveOrgId] = useState<string>("");
+
+  const userRole = data?.user?.role;
+  const userPermissions = data?.user?.permissions ?? [];
+
+  // Filtragem dinâmica de menus por permissão e perfil
+  const filteredNavItems = navItems.filter((item) => {
+    if (userRole === "SUPER_ADMIN") return true;
+    if (item.superAdminOnly && userRole !== "SUPER_ADMIN") return false;
+    if (!item.permission) return true;
+    return userPermissions.includes(item.permission);
+  });
+
+  const fetchOrganizations = () => {
+    fetch("/api/organizations")
+      .then((res) => res.json())
+      .then((list) => {
+        if (Array.isArray(list) && list.length > 0) {
+          setOrganizations(
+            list.map((item) => ({ id: item.id, name: item.name }))
+          );
+          if (!activeOrgId) {
+            const current =
+              list.find((o) => o.id === data?.user?.organizationId) || list[0];
+            setActiveOrgId(current.id);
+          }
+        }
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    fetchOrganizations();
+    const handleOrgUpdate = () => fetchOrganizations();
+    window.addEventListener("organization-updated", handleOrgUpdate);
+    return () => {
+      window.removeEventListener("organization-updated", handleOrgUpdate);
+    };
+  }, [data?.user?.organizationId]);
 
   useEffect(() => {
     if (data?.user?.organizationId) {
@@ -118,42 +176,41 @@ export function AppShell({ children }: PropsWithChildren) {
       return !value;
     });
 
-  const drawer = (
+  const drawerContent = (
     <Box
       sx={{
+        bgcolor: "#0b132b",
+        color: "white",
         height: "100%",
         display: "flex",
         flexDirection: "column",
-        bgcolor: "#101827",
-        color: "#D8E1EF",
       }}
     >
-      <Toolbar sx={{ px: 2.25, gap: 1.5, flexShrink: 0 }}>
-        <Box
+      <Toolbar
+        sx={{
+          justifyContent: collapsed ? "center" : "flex-start",
+          px: 2,
+          minHeight: "64px !important",
+        }}
+      >
+        <Typography
+          variant="h6"
+          noWrap
           sx={{
-            width: 36,
-            height: 36,
-            borderRadius: 2.5,
-            bgcolor: "primary.main",
-            display: "grid",
-            placeItems: "center",
             fontWeight: 800,
+            fontSize: 18,
+            letterSpacing: 0.5,
             color: "white",
           }}
         >
-          i7
-        </Box>
-        {!collapsed && (
-          <Typography color="white" sx={{ fontWeight: 750, fontSize: 16 }}>
-            Cloud Manager
-          </Typography>
-        )}
+          {collapsed ? "i7" : "i7AI Cloud"}
+        </Typography>
       </Toolbar>
 
       <Divider sx={{ borderColor: "rgba(255,255,255,.08)" }} />
 
       <List sx={{ p: 1.25, flex: 1, overflowY: "auto" }}>
-        {items.map(([label, href, icon]) => (
+        {filteredNavItems.map(({ label, href, icon }) => (
           <Tooltip key={href} title={collapsed ? label : ""} placement="right">
             <ListItemButton
               component={Link}
@@ -196,7 +253,7 @@ export function AppShell({ children }: PropsWithChildren) {
 
       <Divider sx={{ borderColor: "rgba(255,255,255,.08)" }} />
 
-      {/* Seção Inferior com o Botão Sair */}
+      {/* Botão Sair mantido na Sidebar */}
       <Box sx={{ p: 1.25, flexShrink: 0 }}>
         <Tooltip title={collapsed ? "Sair da Conta" : ""} placement="right">
           <ListItemButton
@@ -248,7 +305,6 @@ export function AppShell({ children }: PropsWithChildren) {
               sx={{
                 color: "rgba(255,255,255,0.5)",
                 transform: collapsed ? "rotate(180deg)" : "none",
-                "&:hover": { color: "white" },
               }}
             >
               <ChevronLeft />
@@ -261,37 +317,45 @@ export function AppShell({ children }: PropsWithChildren) {
 
   return (
     <Box sx={{ display: "flex", minHeight: "100vh" }}>
-      <Drawer
-        variant={mobile ? "temporary" : "permanent"}
-        open={mobile ? open : true}
-        onClose={() => setOpen(false)}
-        sx={{
-          width: mobile ? expandedWidth : width,
-          flexShrink: 0,
-          "& .MuiDrawer-paper": {
-            width: mobile ? expandedWidth : width,
-            border: 0,
-            transition: "width .2s",
-          },
-        }}
-      >
-        {drawer}
-      </Drawer>
+      <CssBaseline />
+      {mobile ? (
+        <Drawer
+          variant="temporary"
+          open={open}
+          onClose={() => setOpen(false)}
+          sx={{ "& .MuiDrawer-paper": { width: expandedWidth } }}
+        >
+          {drawerContent}
+        </Drawer>
+      ) : (
+        <Drawer
+          variant="permanent"
+          sx={{
+            width,
+            flexShrink: 0,
+            transition: theme.transitions.create("width"),
+            "& .MuiDrawer-paper": {
+              width,
+              boxSizing: "border-box",
+              border: "none",
+              transition: theme.transitions.create("width"),
+            },
+          }}
+        >
+          {drawerContent}
+        </Drawer>
+      )}
 
-      <Box sx={{ flex: 1, minWidth: 0 }}>
+      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
         <AppBar
           position="sticky"
           color="inherit"
           elevation={0}
-          sx={{
-            borderBottom: 1,
-            borderColor: "divider",
-            bgcolor: "background.paper",
-          }}
+          sx={{ borderBottom: 1, borderColor: "divider" }}
         >
           <Toolbar sx={{ gap: 1.5 }}>
             {mobile && (
-              <IconButton onClick={() => setOpen(true)} aria-label="Abrir menu">
+              <IconButton onClick={() => setOpen(true)}>
                 <MenuIcon />
               </IconButton>
             )}
@@ -314,15 +378,25 @@ export function AppShell({ children }: PropsWithChildren) {
               />
             </Box>
 
+            {/* Select dinâmico de Organizações */}
             <Select
               size="small"
-              value={data?.user.organizationId ?? ""}
+              value={activeOrgId || data?.user.organizationId || ""}
+              onChange={(e) => setActiveOrgId(String(e.target.value))}
               displayEmpty
-              sx={{ display: { xs: "none", md: "flex" }, minWidth: 160 }}
+              sx={{ display: { xs: "none", md: "flex" }, minWidth: 180 }}
             >
-              <MenuItem value={data?.user.organizationId ?? ""}>
-                {data?.user.organizationName ?? "Empresa"}
-              </MenuItem>
+              {organizations.length > 0 ? (
+                organizations.map((org) => (
+                  <MenuItem key={org.id} value={org.id}>
+                    {org.name}
+                  </MenuItem>
+                ))
+              ) : (
+                <MenuItem value={data?.user.organizationId || ""}>
+                  {data?.user.organizationName || "Empresa"}
+                </MenuItem>
+              )}
             </Select>
 
             {sectors.length > 0 && (
@@ -356,24 +430,6 @@ export function AppShell({ children }: PropsWithChildren) {
                 {effectiveMode === "dark" ? <LightMode /> : <DarkMode />}
               </IconButton>
             </Tooltip>
-
-            <IconButton onClick={(event) => setAnchor(event.currentTarget)}>
-              <Avatar sx={{ width: 34, height: 34 }}>
-                {data?.user.name?.[0] ?? "U"}
-              </Avatar>
-            </IconButton>
-
-            <Menu
-              anchorEl={anchor}
-              open={Boolean(anchor)}
-              onClose={() => setAnchor(null)}
-            >
-              <MenuItem disabled>{data?.user.email}</MenuItem>
-              <MenuItem onClick={() => signOut({ callbackUrl: "/login" })}>
-                <Logout fontSize="small" sx={{ mr: 1 }} />
-                Sair da conta
-              </MenuItem>
-            </Menu>
           </Toolbar>
         </AppBar>
 

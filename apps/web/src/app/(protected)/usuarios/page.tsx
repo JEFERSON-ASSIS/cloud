@@ -11,23 +11,15 @@ export default async function UsersPage() {
     orderBy: { user: { name: "asc" } },
   });
   return (
-    <>
-      <PageHeader
-        title="Usuários"
-        description="Gerencie acessos e perfis da empresa atual."
-      />
-      <Card>
-        <UsersTable
-          rows={rows.map(({ user, role }) => ({
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            role: role.name,
-            status: user.status,
-            lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
-          }))}
-        />
-      </Card>
-    </>
+    <UsersTable
+      rows={rows.map(({ user, role }) => ({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: role.name,
+        status: user.status,
+        lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
+      }))}
+    />
   );
 }

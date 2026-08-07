@@ -15,10 +15,19 @@ export async function GET(request: Request) {
     const storageSpaceId = url.searchParams.get("storageSpaceId");
     const organizationId = tenant.organizationId!;
 
+    const isPrivileged = tenant.role === "SUPER_ADMIN" || tenant.role === "ADMIN";
     let isReadOnly = false;
 
+    let userSectorIds: string[] = [];
+    if (!isPrivileged) {
+      const userSectors = await prisma.sectorUser.findMany({
+        where: { userId: tenant.userId },
+        select: { sectorId: true },
+      });
+      userSectorIds = userSectors.map((s) => s.sectorId);
+    }
+
     if (sectorId) {
-      const isOrgAdminOrSuper = tenant.role === "SUPER_ADMIN" || tenant.role === "ADMIN";
       const membership = await prisma.sectorUser.findUnique({
         where: {
           sectorId_userId: {
@@ -28,18 +37,24 @@ export async function GET(request: Request) {
         },
       });
       
-      assertSectorPermission(membership?.role, "VIEWER_ONLY", isOrgAdminOrSuper);
+      assertSectorPermission(membership?.role, "VIEWER_ONLY", isPrivileged);
       
-      if (membership?.role === "VIEWER_ONLY" && !isOrgAdminOrSuper) {
+      if (membership?.role === "VIEWER_ONLY" && !isPrivileged) {
         isReadOnly = true;
       }
     }
+
+    const sectorFilter = sectorId
+      ? { sectorId }
+      : !isPrivileged
+      ? { sectorId: { in: userSectorIds } }
+      : {};
 
     const [folders, documents, breadcrumbs] = await Promise.all([
       prisma.folder.findMany({
         where: {
           organizationId,
-          ...(sectorId ? { sectorId } : {}),
+          ...sectorFilter,
           ...(storageSpaceId ? { storageSpaceId } : {}),
           ...(allFolders
             ? { deletedAt: null }
@@ -56,7 +71,7 @@ export async function GET(request: Request) {
       prisma.document.findMany({
         where: {
           organizationId,
-          ...(sectorId ? { sectorId } : {}),
+          ...sectorFilter,
           ...(storageSpaceId ? { storageSpaceId } : {}),
           ...(trash
             ? { deletedAt: { not: null } }

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import { AppRouterCacheProvider } from "@mui/material-nextjs/v15-appRouter";
 import { Providers } from "@/components/Providers";
 import "./globals.css";
@@ -22,7 +23,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{ children: React.ReactNode }>) {
+}: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="pt-BR" suppressHydrationWarning>
       <body>

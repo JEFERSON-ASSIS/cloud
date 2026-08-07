@@ -16,6 +16,7 @@ import {
   Container,
   Divider,
   Grid,
+  IconButton,
   InputAdornment,
   Stack,
   TextField,
@@ -29,6 +30,8 @@ import {
   VerifiedUserOutlined,
   BackupOutlined,
   AccountBalance,
+  Visibility,
+  VisibilityOff,
 } from "@mui/icons-material";
 
 const schema = z.object({
@@ -45,6 +48,7 @@ function LoginContent() {
 
   const [formError, setFormError] = useState("");
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const {
     register,
@@ -404,7 +408,7 @@ function LoginContent() {
                         </Typography>
                         <TextField
                           fullWidth
-                          type="password"
+                          type={showPassword ? "text" : "password"}
                           size="small"
                           placeholder="••••••••"
                           {...register("password")}
@@ -415,6 +419,23 @@ function LoginContent() {
                               startAdornment: (
                                 <InputAdornment position="start">
                                   <LockOutlined sx={{ color: "#94a3b8", fontSize: 18 }} />
+                                </InputAdornment>
+                              ),
+                              endAdornment: (
+                                <InputAdornment position="end">
+                                  <IconButton
+                                    aria-label="alternar visibilidade da senha"
+                                    onClick={() => setShowPassword((show) => !show)}
+                                    edge="end"
+                                    size="small"
+                                    sx={{ color: "#94a3b8" }}
+                                  >
+                                    {showPassword ? (
+                                      <VisibilityOff sx={{ fontSize: 18 }} />
+                                    ) : (
+                                      <Visibility sx={{ fontSize: 18 }} />
+                                    )}
+                                  </IconButton>
                                 </InputAdornment>
                               ),
                             },

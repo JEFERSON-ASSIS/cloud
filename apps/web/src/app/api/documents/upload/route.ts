@@ -18,10 +18,18 @@ export async function POST(request: Request) {
     let storageSpaceId = data.get("storageSpaceId")?.toString() || null;
 
     if (!(file instanceof File)) throw new Error("Selecione um arquivo.");
-    const max = Number(process.env.MAX_UPLOAD_SIZE ?? 104_857_600);
-    if (file.size <= 0 || file.size > max)
+
+    const org = await prisma.organization.findUnique({
+      where: { id: tenant.organizationId! },
+      select: { storageLimit: true },
+    });
+
+    const maxBytes = org?.storageLimit ? Number(org.storageLimit) : Number(process.env.MAX_UPLOAD_SIZE ?? 104_857_600);
+    const maxMb = Math.round(maxBytes / 1024 / 1024);
+
+    if (file.size <= 0 || file.size > maxBytes)
       throw new Error(
-        `O arquivo deve ter no máximo ${Math.round(max / 1024 / 1024)} MB.`,
+        `O arquivo excede o limite máximo permitido de ${maxMb} MB.`,
       );
 
     const name = cleanName(file.name);

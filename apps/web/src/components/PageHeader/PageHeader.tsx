@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Box, Typography } from "@mui/material";
 export function PageHeader({
   title,
@@ -6,7 +7,7 @@ export function PageHeader({
 }: {
   title: string;
   description?: string;
-  action?: React.ReactNode;
+  action?: ReactNode;
 }) {
   return (
     <Box
