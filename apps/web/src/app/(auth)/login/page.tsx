@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -29,7 +28,6 @@ import {
   ShieldOutlined,
   VerifiedUserOutlined,
   BackupOutlined,
-  ArrowBack,
   AccountBalance,
 } from "@mui/icons-material";
 
@@ -93,31 +91,20 @@ export default function LoginPage() {
           {/* LADO ESQUERDO: Apresentação Institucional i7AI */}
           <Grid size={{ xs: 12, lg: 7 }}>
             <Stack spacing={4} sx={{ maxWidth: 720, mx: { xs: "auto", lg: 0 } }}>
-              {/* Logo Emblem i7AI */}
+              {/* Logo Oficial i7AI (Tamanho Exato do Portal) */}
               <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
                 <Box
+                  component="img"
+                  src="/i7ai-logo-white.jpg"
+                  alt="i7AI Sistemas Inteligentes"
                   sx={{
-                    width: 76,
-                    height: 76,
-                    borderRadius: "50%",
-                    border: "2px solid rgba(255, 255, 255, 0.25)",
-                    display: "grid",
-                    placeItems: "center",
-                    bgcolor: "rgba(255, 255, 255, 0.04)",
-                    boxShadow: "0 0 35px rgba(99, 102, 241, 0.35)",
+                    width: 140,
+                    height: "auto",
+                    display: "block",
+                    borderRadius: 2,
+                    boxShadow: "0 0 25px rgba(99, 102, 241, 0.3)",
                   }}
-                >
-                  <Typography
-                    sx={{
-                      fontWeight: 900,
-                      fontSize: 22,
-                      letterSpacing: 2,
-                      color: "#ffffff",
-                    }}
-                  >
-                    i7AI
-                  </Typography>
-                </Box>
+                />
               </Box>
 
               {/* Badge B2G */}
@@ -286,26 +273,6 @@ export default function LoginPage() {
               >
                 <CardContent sx={{ p: 0 }}>
                   <Stack spacing={3}>
-                    {/* Botão Voltar */}
-                    <Box>
-                      <Typography
-                        component={Link}
-                        href="/"
-                        variant="caption"
-                        sx={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 0.5,
-                          color: "#64748b",
-                          textDecoration: "none",
-                          fontWeight: 600,
-                          "&:hover": { color: "#4f46e5" },
-                        }}
-                      >
-                        <ArrowBack fontSize="inherit" /> Voltar para a página inicial
-                      </Typography>
-                    </Box>
-
                     {/* Header do Card */}
                     <Box>
                       <Typography

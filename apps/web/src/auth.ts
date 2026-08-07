@@ -12,71 +12,80 @@ const credentialsSchema = z.object({
   password: z.string().min(8).max(200),
 });
 
+const providers: any[] = [];
+
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  providers.push(
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      allowDangerousEmailAccountLinking: true,
+    })
+  );
+}
+
+providers.push(
+  Credentials({
+    credentials: { email: {}, password: {} },
+    async authorize(raw) {
+      const parsed = credentialsSchema.safeParse(raw);
+      if (!parsed.success) return null;
+      const user = await prisma.user.findUnique({
+        where: { email: parsed.data.email },
+        include: {
+          organizations: {
+            where: { organization: { status: "ACTIVE", deletedAt: null } },
+            orderBy: { isDefault: "desc" },
+            include: {
+              organization: true,
+              role: {
+                include: { permissions: { include: { permission: true } } },
+              },
+            },
+          },
+        },
+      });
+      if (
+        !user ||
+        user.status !== "ACTIVE" ||
+        user.deletedAt ||
+        !(await argon2.verify(user.passwordHash, parsed.data.password))
+      )
+        return null;
+      const membership = user.organizations[0];
+      if (!membership) return null;
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date() },
+      });
+      await prisma.auditLog.create({
+        data: {
+          organizationId: membership.organizationId,
+          userId: user.id,
+          action: "LOGIN",
+          resourceType: "Session",
+        },
+      });
+      return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        organizationId: membership.organizationId,
+        organizationName: membership.organization.name,
+        role: membership.role.name as RoleName,
+        permissions: membership.role.permissions.map(
+          (item) => item.permission.key as Permission
+        ),
+      };
+    },
+  })
+);
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   secret: process.env.AUTH_SECRET!,
   session: { strategy: "jwt", maxAge: 8 * 60 * 60, updateAge: 30 * 60 },
-  providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID || "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
-      allowDangerousEmailAccountLinking: true,
-    }),
-    Credentials({
-      credentials: { email: {}, password: {} },
-      async authorize(raw) {
-        const parsed = credentialsSchema.safeParse(raw);
-        if (!parsed.success) return null;
-        const user = await prisma.user.findUnique({
-          where: { email: parsed.data.email },
-          include: {
-            organizations: {
-              where: { organization: { status: "ACTIVE", deletedAt: null } },
-              orderBy: { isDefault: "desc" },
-              include: {
-                organization: true,
-                role: {
-                  include: { permissions: { include: { permission: true } } },
-                },
-              },
-            },
-          },
-        });
-        if (
-          !user ||
-          user.status !== "ACTIVE" ||
-          user.deletedAt ||
-          !(await argon2.verify(user.passwordHash, parsed.data.password))
-        )
-          return null;
-        const membership = user.organizations[0];
-        if (!membership) return null;
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { lastLoginAt: new Date() },
-        });
-        await prisma.auditLog.create({
-          data: {
-            organizationId: membership.organizationId,
-            userId: user.id,
-            action: "LOGIN",
-            resourceType: "Session",
-          },
-        });
-        return {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          organizationId: membership.organizationId,
-          organizationName: membership.organization.name,
-          role: membership.role.name as RoleName,
-          permissions: membership.role.permissions.map(
-            (item) => item.permission.key as Permission,
-          ),
-        };
-      },
-    }),
-  ],
+  providers,
   callbacks: {
     ...authConfig.callbacks,
     async signIn({ user, account }) {
