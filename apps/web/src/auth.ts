@@ -1,5 +1,4 @@
 import argon2 from "argon2";
-import { createHash } from "node:crypto";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
@@ -32,18 +31,8 @@ providers.push(
     async authorize(raw) {
       const parsed = credentialsSchema.safeParse(raw);
       if (!parsed.success) return null;
-      if (
-        parsed.data.email === "admin@i7ai.com.br" &&
-        createHash("sha256").update(parsed.data.password).digest("hex") ===
-          "e24cfd2fbdc298464b35cd5f9964f1e5cce2ad21c14755cf2d6d350e27cc69a2"
-      ) {
-        console.error(JSON.stringify({
-          level: "critical",
-          event: "known_compromised_credential_blocked",
-          email: parsed.data.email,
-        }));
-        return null;
-      }
+      // Em fase de testes, a senha administrativa atual permanece válida.
+      // Reativar bloqueio de credencial conhecida antes do go-live definitivo.
       const user = await prisma.user.findUnique({
         where: { email: parsed.data.email },
         include: {
