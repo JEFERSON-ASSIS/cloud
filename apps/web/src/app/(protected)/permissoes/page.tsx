@@ -314,8 +314,8 @@ export default function PermissoesPage() {
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
                       {item.label}
                     </Typography>
-                    <Typography variant="caption" color="text.secondary" display="block">
-                      {item.key} — {item.description}
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                      {`${item.key} — ${item.description}`}
                     </Typography>
                   </TableCell>
                   {roles.map((roleName) => {
