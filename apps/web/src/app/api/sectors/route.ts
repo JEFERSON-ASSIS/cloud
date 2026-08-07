@@ -153,7 +153,7 @@ export async function POST(request: Request) {
           await writeAudit({
             organizationId,
             userId: tenant.userId,
-            action: "GOOGLE_DRIVE_FOLDER_CREATE",
+            action: "STORAGE_FOLDER_CREATE",
             resourceType: "ORGANIZATION_FOLDER",
             resourceId: mainOrgFolderId,
             metadata: { name: organization.name },
@@ -172,7 +172,7 @@ export async function POST(request: Request) {
           await writeAudit({
             organizationId,
             userId: tenant.userId,
-            action: "GOOGLE_DRIVE_FOLDER_CREATE",
+            action: "STORAGE_FOLDER_CREATE",
             resourceType: "SECTOR_FOLDER",
             resourceId: sectorDriveFolderId,
             metadata: { name: sector.name, parentFolderId: mainOrgFolderId },

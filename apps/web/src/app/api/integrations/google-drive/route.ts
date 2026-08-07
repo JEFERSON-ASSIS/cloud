@@ -69,7 +69,7 @@ export async function PATCH(request: Request) {
     await writeAudit({
       organizationId,
       userId: tenant.userId,
-      action: "GOOGLE_DRIVE_ROOT_CHANGED",
+      action: "STORAGE_ROOT_CHANGED",
       resourceType: "StorageConnection",
       resourceId: connection.id,
       metadata: { rootFolderId },
@@ -135,7 +135,7 @@ export async function DELETE(request: Request) {
       await writeAudit({
         organizationId,
         userId: tenant.userId,
-        action: "GOOGLE_DRIVE_DISCONNECTED",
+        action: "STORAGE_DISCONNECTED",
         resourceType: "StorageConnection",
         resourceId: connection.id,
       });

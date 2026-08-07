@@ -1,5 +1,6 @@
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
+import { sanitizeAuditAction, sanitizeStorageText } from "@/lib/storage-branding";
 
 export async function GET(request: Request) {
   try {
@@ -36,7 +37,19 @@ export async function GET(request: Request) {
       take: 500,
     });
 
-    return Response.json(logs);
+    return Response.json(
+      logs.map((log) => ({
+        ...log,
+        action: sanitizeAuditAction(log.action, tenant.role),
+        resourceType: log.resourceType
+          ? sanitizeStorageText(log.resourceType, tenant.role)
+          : log.resourceType,
+        metadata:
+          log.metadata && typeof log.metadata === "object"
+            ? JSON.parse(sanitizeStorageText(JSON.stringify(log.metadata), tenant.role))
+            : log.metadata,
+      })),
+    );
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : "Erro interno." },

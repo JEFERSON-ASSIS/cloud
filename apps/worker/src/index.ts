@@ -95,12 +95,12 @@ const backupWorker = new Worker(
           if (ciphertext) config = JSON.parse(decryptSecret(ciphertext));
         }
 
-        // Conectar ao Google Drive
+        // Conectar ao armazenamento em nuvem
         const connection = await prisma.storageConnection.findFirst({
           where: { organizationId, provider: "GOOGLE_DRIVE", status: "CONNECTED", deletedAt: null },
           include: { googleDrive: true },
         });
-        if (!connection?.googleDrive) throw new Error("Google Drive não está conectado.");
+        if (!connection?.googleDrive) throw new Error("Armazenamento em nuvem não está conectado.");
 
         const accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
         const drive = new GoogleDriveStorageProvider(accessToken);
@@ -447,9 +447,9 @@ const backupWorker = new Worker(
 
       await log("INFO", `Checksum SHA-256 gerado (arquivo criptografado): ${checksumSha256} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`);
 
-      // 4. Carregar conexão Google Drive e fazer upload
-      await updateProgress(65, "Fazendo upload para o Google Drive", "UPLOADING");
-      await log("INFO", "Buscando credenciais de armazenamento Google Drive...");
+      // 4. Carregar conexão armazenamento em nuvem e fazer upload
+      await updateProgress(65, "Fazendo upload para o armazenamento em nuvem", "UPLOADING");
+      await log("INFO", "Buscando credenciais do armazenamento em nuvem...");
 
       const connection = await prisma.storageConnection.findFirst({
         where: {
@@ -462,7 +462,7 @@ const backupWorker = new Worker(
       });
 
       if (!connection?.googleDrive) {
-        throw new Error("Nenhuma conta Google Drive conectada na organização.");
+        throw new Error("Nenhuma conta de armazenamento em nuvem conectada na organização.");
       }
 
       // Função de refresh do token Google
@@ -472,9 +472,9 @@ const backupWorker = new Worker(
         connection.googleDrive.expiresAt.getTime() < Date.now() + 60_000
       ) {
         if (!connection.googleDrive.encryptedRefreshToken) {
-          throw new Error("Reconecte a conta Google Drive no painel do sistema.");
+          throw new Error("Reconecte a conta de armazenamento em nuvem no painel do sistema.");
         }
-        await log("INFO", "Renovando token de acesso do Google Drive...");
+        await log("INFO", "Renovando token de acesso do armazenamento em nuvem...");
         
         // Refresh token logic
         const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -490,7 +490,7 @@ const backupWorker = new Worker(
           }),
         });
         if (!response.ok) {
-          throw new Error("Falha ao renovar token de acesso do Google Drive.");
+          throw new Error("Falha ao renovar token de acesso do armazenamento em nuvem.");
         }
         const refreshed = await response.json();
         accessToken = refreshed.access_token;
@@ -509,7 +509,7 @@ const backupWorker = new Worker(
       
       let mainOrgFolderId: string | undefined = connection.googleDrive.rootFolderId || undefined;
 
-      // Se nao existir rootFolderId da organizacao no Google Drive, cria/localiza a pasta da Organizacao
+      // Se nao existir rootFolderId da organizacao no armazenamento em nuvem, cria/localiza a pasta da Organizacao
       if (!mainOrgFolderId) {
         const orgObj = await prisma.organization.findUnique({ where: { id: organizationId } });
         const orgName = orgObj?.name || "i7AI Cloud Backups";
@@ -575,7 +575,7 @@ const backupWorker = new Worker(
         }
       }
 
-      await log("INFO", `Iniciando upload do backup criptografado (${filename}) para a pasta da Secretaria no Google Drive...`);
+      await log("INFO", `Iniciando upload do backup criptografado (${filename}) para a pasta da Secretaria no armazenamento em nuvem...`);
       const readableStream = createReadStream(encryptedTempFilePath);
       
       const stored = await drive.upload(
@@ -585,7 +585,7 @@ const backupWorker = new Worker(
         "application/octet-stream"
       );
 
-      await log("INFO", `Upload concluído. Google Drive File ID: ${stored.id}`);
+      await log("INFO", `Upload concluído. ID do arquivo: ${stored.id}`);
 
       // Registrar arquivo de backup
       const backupFile = await prisma.backupFile.create({

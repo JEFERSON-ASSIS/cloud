@@ -38,14 +38,14 @@ export async function GET(request: Request) {
     const connection = existing
       ? await prisma.storageConnection.update({
           where: { id: existing.id },
-          data: { status: "CONNECTED", deletedAt: null, name: "Google Drive" },
+          data: { status: "CONNECTED", deletedAt: null, name: "Armazenamento em nuvem" },
         })
       : await prisma.storageConnection.create({
           data: {
             organizationId: state.organizationId,
             provider: "GOOGLE_DRIVE",
             status: "CONNECTED",
-            name: "Google Drive",
+            name: "Armazenamento em nuvem",
           },
         });
     await prisma.googleDriveConnection.upsert({
@@ -71,7 +71,7 @@ export async function GET(request: Request) {
     await writeAudit({
       organizationId: state.organizationId,
       userId: state.userId,
-      action: "GOOGLE_DRIVE_CONNECTED",
+      action: "STORAGE_CONNECTED",
       resourceType: "StorageConnection",
       resourceId: connection.id,
     });

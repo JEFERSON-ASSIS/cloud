@@ -97,7 +97,9 @@ export default async function SettingsPage() {
               <Stack direction="row" sx={{ justifyContent: "space-between" }}>
                 <Typography>
                   {connection?.googleDrive?.accountEmail ??
-                    "Google Drive não conectado"}
+                    (tenant.role === "SUPER_ADMIN"
+                      ? "Google Drive não conectado"
+                      : "Armazenamento em nuvem não conectado")}
                 </Typography>
                 <Chip
                   size="small"
@@ -123,7 +125,9 @@ export default async function SettingsPage() {
             </CardContent>
             <CardActions>
               <Button variant="contained" href="/integracoes">
-                Configurar Google Drive
+                {tenant.role === "SUPER_ADMIN"
+                  ? "Configurar Google Drive"
+                  : "Configurar armazenamento"}
               </Button>
             </CardActions>
           </Card>

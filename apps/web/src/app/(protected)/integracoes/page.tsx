@@ -1,7 +1,9 @@
 "use client";
 import { tenantFetch } from "@/lib/tenant-fetch";
+import { storageProviderLabel } from "@/lib/storage-branding";
 
 import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 import { CloudDone, Storage, Settings } from "@mui/icons-material";
 import {
   Alert,
@@ -42,6 +44,8 @@ type S3Connection = {
 
 export default function IntegrationsPage() {
   const query = useSearchParams();
+  const { data: session } = useSession();
+  const providerLabel = storageProviderLabel(session?.user?.role);
   const [connection, setConnection] = useState<Connection>(null);
   const [s3Conn, setS3Conn] = useState<S3Connection>(null);
   const [loading, setLoading] = useState(true);
@@ -59,9 +63,9 @@ export default function IntegrationsPage() {
   const [s3AccessKey, setS3AccessKey] = useState("");
   const [s3SecretKey, setS3SecretKey] = useState("");
 
-  const [message, setMessage] = useState(
+  const [message, setMessage] = useState<string | null>(
     query.get("connected")
-      ? "Google Drive conectado com sucesso."
+      ? `${providerLabel} conectado com sucesso.`
       : query.get("error")
   );
 
@@ -98,12 +102,12 @@ export default function IntegrationsPage() {
   const disconnect = async () => {
     if (
       !confirm(
-        "Desconectar o Google Drive? Os documentos existentes ficarão indisponíveis até uma nova conexão."
+        `Desconectar o ${providerLabel}? Os documentos existentes ficarão indisponíveis até uma nova conexão.`
       )
     )
       return;
     await tenantFetch("/api/integrations/google-drive", { method: "DELETE" });
-    setMessage("Google Drive desconectado.");
+    setMessage(`${providerLabel} desconectado.`);
     await load();
   };
 
@@ -221,11 +225,11 @@ export default function IntegrationsPage() {
                 />
               </Stack>
               <Typography variant="h6" sx={{ mt: 2 }}>
-                Google Drive
+                {providerLabel}
               </Typography>
               <Typography color="text.secondary">
                 {connection?.accountEmail ??
-                  "Armazene documentos e backups diretamente no Google Drive."}
+                  `Armazene documentos e backups diretamente no ${providerLabel}.`}
               </Typography>
               {connection?.lastTestedAt && (
                 <Typography variant="caption">
@@ -259,7 +263,7 @@ export default function IntegrationsPage() {
                   variant="contained"
                   href="/api/integrations/google-drive/connect"
                 >
-                  Conectar Google Drive
+                  Conectar {providerLabel}
                 </Button>
               )}
             </CardActions>

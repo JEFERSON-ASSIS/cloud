@@ -227,13 +227,18 @@ export default function AuditPage() {
 
   const totalLogs = filteredRows.length;
   const errorLogs = filteredRows.filter((r) => r.action.includes("ERROR") || r.action.includes("DELETE")).length;
-  const driveLogs = filteredRows.filter((r) => r.action.includes("DRIVE") || r.resourceType?.includes("DRIVE")).length;
+  const driveLogs = filteredRows.filter((r) =>
+    r.action.includes("DRIVE") ||
+    r.action.includes("STORAGE") ||
+    r.resourceType?.includes("DRIVE") ||
+    r.resourceType?.includes("FOLDER")
+  ).length;
 
   return (
     <Stack spacing={3}>
       <PageHeader
         title="Console & Auditoria do Sistema"
-        description="Acompanhe em tempo real todos os eventos, chamadas da API do Google Drive, exceções e ações executadas no servidor."
+        description="Acompanhe em tempo real todos os eventos, operações de armazenamento, exceções e ações executadas no servidor."
         action={
           <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
             <FormControlLabel
@@ -270,7 +275,7 @@ export default function AuditPage() {
         {[
           { label: "Total de Eventos Registrados", value: totalLogs, icon: <FactCheck />, color: "#667eea" },
           { label: "Alertas & Exclusões", value: errorLogs, icon: <BugReport />, color: "#f5576c" },
-          { label: "Eventos Google Drive", value: driveLogs, icon: <CloudQueue />, color: "#4facfe" },
+          { label: "Eventos de Armazenamento", value: driveLogs, icon: <CloudQueue />, color: "#4facfe" },
           { label: "Usuários Ativos", value: new Set(rows.map(r => r.user?.email).filter(Boolean)).size, icon: <Person />, color: "#43e97b" },
         ].map((stat) => (
           <Grid size={{ xs: 6, md: 3 }} key={stat.label}>

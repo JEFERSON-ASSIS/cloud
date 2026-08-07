@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@i7ai/database";
 import { requireTenantOrganization } from "@/server/tenant";
 import { getUserSectorIds } from "@/server/sector-access";
+import { sanitizeStorageText } from "@/lib/storage-branding";
 
 export async function GET(request: Request) {
   try {
@@ -51,7 +52,15 @@ export async function GET(request: Request) {
       prisma.backupLog.count({ where: where as any }),
     ]);
 
-    return NextResponse.json({ logs, total, limit, offset });
+    return NextResponse.json({
+      logs: logs.map((log) => ({
+        ...log,
+        message: sanitizeStorageText(log.message, tenant.role),
+      })),
+      total,
+      limit,
+      offset,
+    });
   } catch (err: unknown) {
     if (err instanceof Error && err.message.includes("Unauthorized"))
       return NextResponse.json({ error: err.message }, { status: 401 });

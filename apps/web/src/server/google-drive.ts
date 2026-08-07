@@ -63,7 +63,7 @@ async function refreshToken(refreshToken: string) {
     }),
   });
   if (!response.ok)
-    throw new Error("Não foi possível renovar o acesso ao Google Drive.");
+    throw new Error("Não foi possível renovar o acesso ao armazenamento em nuvem.");
   return (await response.json()) as {
     access_token: string;
     expires_in: number;
@@ -81,14 +81,14 @@ export async function driveForOrganization(organizationId: string) {
     include: { googleDrive: true },
   });
   if (!connection?.googleDrive)
-    throw new Error("Conecte o Google Drive antes de continuar.");
+    throw new Error("Conecte o armazenamento em nuvem antes de continuar.");
   let accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
   if (
     connection.googleDrive.expiresAt &&
     connection.googleDrive.expiresAt.getTime() < Date.now() + 60_000
   ) {
     if (!connection.googleDrive.encryptedRefreshToken)
-      throw new Error("Reconecte o Google Drive.");
+      throw new Error("Reconecte o armazenamento em nuvem.");
     const refreshed = await refreshToken(
       decryptSecret(connection.googleDrive.encryptedRefreshToken),
     );
