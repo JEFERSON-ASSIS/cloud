@@ -1,5 +1,7 @@
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
+import { decryptSecret } from "@/server/encryption";
+import { GoogleDriveStorageProvider } from "@i7ai/storage";
 
 export async function GET() {
   try {
@@ -55,12 +57,19 @@ export async function POST(req: Request) {
     }
 
     const limitBytes = BigInt(storageLimitGB || 100) * BigInt(1073741824); // GB para Bytes
-    const slug = name
+    const baseSlug = name
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "") || `org-${Date.now()}`;
+
+    let slug = baseSlug;
+    let counter = 1;
+    while (await prisma.organization.findFirst({ where: { slug } })) {
+      slug = `${baseSlug}-${counter}`;
+      counter++;
+    }
 
     const newOrg = await prisma.organization.create({
       data: {
@@ -71,6 +80,32 @@ export async function POST(req: Request) {
         status: "ACTIVE",
       },
     });
+
+    // Tentar criar pasta mãe da Organização no Google Drive se houver conexão ativa
+    try {
+      const connection = await prisma.storageConnection.findFirst({
+        where: { provider: "GOOGLE_DRIVE", status: "CONNECTED", deletedAt: null },
+        include: { googleDrive: true },
+      });
+
+      if (connection?.googleDrive) {
+        const accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
+        const drive = new GoogleDriveStorageProvider(accessToken);
+        const rootItems = await drive.list("root");
+        let orgFolderId = rootItems.find((i) => i.name === newOrg.name)?.id;
+        if (!orgFolderId) {
+          orgFolderId = await drive.createFolder(newOrg.name);
+        }
+        if (!connection.googleDrive.rootFolderId) {
+          await prisma.googleDriveConnection.update({
+            where: { id: connection.googleDrive.id },
+            data: { rootFolderId: orgFolderId },
+          });
+        }
+      }
+    } catch (errDrive) {
+      console.warn("Aviso: Não foi possível criar pasta da organização no Google Drive:", errDrive);
+    }
 
     return Response.json({
       ...newOrg,
