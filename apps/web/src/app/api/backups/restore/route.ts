@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
+import { assertSectorAccess } from "@/server/sector-access";
+import { writeAudit } from "@/server/audit";
 import { addBackupJob } from "@i7ai/backup-core";
 
 export async function POST(req: Request) {
   try {
     const tenant = await requireTenant("backup.manage");
+    const organizationId = tenant.organizationId!;
     const body = await req.json();
     const { backupRunId, targetServerId } = body;
 
@@ -13,11 +16,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "ID do backup (backupRunId) é obrigatório." }, { status: 400 });
     }
 
-    // Buscar o backup run e o arquivo gerado
     const originalRun = await prisma.backupRun.findFirst({
       where: {
         id: backupRunId,
-        organizationId: tenant.organizationId!,
+        organizationId,
       },
       include: {
         source: true,
@@ -29,17 +31,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Backup ou arquivo de backup não encontrado." }, { status: 404 });
     }
 
+    await assertSectorAccess(tenant.userId, organizationId, originalRun.sectorId, tenant.role, "ADMIN");
+
     const backupFile = originalRun.files[0];
     if (!backupFile) {
       return NextResponse.json({ error: "Arquivo de backup não encontrado." }, { status: 404 });
     }
 
-
-
-    // Criar um novo BackupRun com tipo RESTORE
     const restoreRun = await prisma.backupRun.create({
       data: {
-        organizationId: tenant.organizationId!,
+        organizationId,
+        sectorId: originalRun.sectorId,
         sourceId: originalRun.sourceId,
         status: "PREPARING",
         currentStep: "Iniciando Restauração",
@@ -55,7 +57,15 @@ export async function POST(req: Request) {
       },
     });
 
-    // Enfileirar a tarefa de restauração no worker
+    await writeAudit({
+      organizationId,
+      userId: tenant.userId,
+      action: "BACKUP_RESTORE",
+      resourceType: "BackupRun",
+      resourceId: restoreRun.id,
+      metadata: { originalRunId: originalRun.id, sectorId: originalRun.sectorId },
+    });
+
     await addBackupJob(restoreRun.id, originalRun.sourceId, {
       isRestore: true,
       originalRunId: originalRun.id,

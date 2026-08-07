@@ -45,6 +45,9 @@ services:
     image: ghcr.io/jeferson-assis/i7ai-cloud-manager-worker:main
     networks:
       - SGDMNET
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - i7ai_worker_tmp_backups:/app/tmp-backups
     environment:
       NODE_ENV: production
       DATABASE_URL: "postgresql://postgres:SUA_SENHA_DO_POSTGRES_AQUI@postgres:5432/i7ai_cloud?schema=public"
@@ -78,6 +81,9 @@ services:
         limits:
           cpus: "1"
           memory: 1024M
+
+volumes:
+  i7ai_worker_tmp_backups:
 
 networks:
   SGDMNET:

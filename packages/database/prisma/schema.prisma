@@ -302,6 +302,7 @@ model Server {
 model BackupSource {
   id              String                 @id @default(uuid()) @db.Uuid
   organizationId  String                 @map("organization_id") @db.Uuid
+  sectorId        String?                @map("sector_id") @db.Uuid
   serverId        String?                @map("server_id") @db.Uuid
   name            String
   type            BackupType
@@ -311,17 +312,20 @@ model BackupSource {
   updatedAt       DateTime               @updatedAt @map("updated_at")
   deletedAt       DateTime?              @map("deleted_at")
   organization    Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sector          Sector?                @relation(fields: [sectorId], references: [id], onDelete: SetNull)
   server          Server?                @relation(fields: [serverId], references: [id], onDelete: SetNull)
   schedules       BackupScheduleSource[]
   runs            BackupRun[]
 
   @@index([organizationId, active])
+  @@index([organizationId, sectorId])
   @@map("backup_sources")
 }
 
 model BackupSchedule {
   id               String                 @id @default(uuid()) @db.Uuid
   organizationId   String                 @map("organization_id") @db.Uuid
+  sectorId         String?                @map("sector_id") @db.Uuid
   name             String
   frequency        String
   time             String
@@ -333,10 +337,12 @@ model BackupSchedule {
   createdAt        DateTime               @default(now()) @map("created_at")
   updatedAt        DateTime               @updatedAt @map("updated_at")
   organization     Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sector           Sector?                @relation(fields: [sectorId], references: [id], onDelete: SetNull)
   sources          BackupScheduleSource[]
   runs             BackupRun[]
 
   @@index([organizationId, active])
+  @@index([organizationId, sectorId])
   @@map("backup_schedules")
 }
 
@@ -353,6 +359,7 @@ model BackupScheduleSource {
 model BackupRun {
   id             String          @id @default(uuid()) @db.Uuid
   organizationId String          @map("organization_id") @db.Uuid
+  sectorId       String?         @map("sector_id") @db.Uuid
   sourceId       String          @map("source_id") @db.Uuid
   scheduleId     String?         @map("schedule_id") @db.Uuid
   status         BackupRunStatus @default(PENDING)
@@ -365,18 +372,21 @@ model BackupRun {
   createdAt      DateTime        @default(now()) @map("created_at")
   updatedAt      DateTime        @updatedAt @map("updated_at")
   organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sector         Sector?         @relation(fields: [sectorId], references: [id], onDelete: SetNull)
   source         BackupSource    @relation(fields: [sourceId], references: [id], onDelete: Restrict)
   schedule       BackupSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
   files          BackupFile[]
   logs           BackupLog[]
 
   @@index([organizationId, createdAt])
+  @@index([organizationId, sectorId])
   @@map("backup_runs")
 }
 
 model BackupFile {
   id                  String            @id @default(uuid()) @db.Uuid
   backupRunId         String            @map("backup_run_id") @db.Uuid
+  sectorId            String?           @map("sector_id") @db.Uuid
   storageConnectionId String            @map("storage_connection_id") @db.Uuid
   name                String
   remoteFileId        String            @map("remote_file_id")
@@ -385,9 +395,11 @@ model BackupFile {
   verifiedAt          DateTime?         @map("verified_at")
   createdAt           DateTime          @default(now()) @map("created_at")
   backupRun           BackupRun         @relation(fields: [backupRunId], references: [id], onDelete: Cascade)
+  sector              Sector?           @relation(fields: [sectorId], references: [id], onDelete: SetNull)
   storageConnection   StorageConnection @relation(fields: [storageConnectionId], references: [id], onDelete: Restrict)
 
   @@index([backupRunId])
+  @@index([sectorId])
   @@map("backup_files")
 }
 
@@ -451,6 +463,10 @@ model Sector {
   storageSpaces  StorageSpace[]
   folders        Folder[]
   documents      Document[]
+  backupSources  BackupSource[]
+  backupSchedules BackupSchedule[]
+  backupRuns     BackupRun[]
+  backupFiles    BackupFile[]
 
   @@unique([organizationId, name])
   @@map("sectors")

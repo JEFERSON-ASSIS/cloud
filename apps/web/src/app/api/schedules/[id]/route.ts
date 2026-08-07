@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
 import { writeAudit } from "@/server/audit";
+import { assertSectorAccess } from "@/server/sector-access";
 import { z } from "zod";
 
 type Params = Promise<{ id: string }>;
@@ -26,6 +27,7 @@ export async function GET(_req: Request, { params }: { params: Params }) {
     const schedule = await prisma.backupSchedule.findFirst({
       where: { id, organizationId },
       include: {
+        sector: { select: { id: true, name: true } },
         sources: {
           include: { source: { select: { id: true, name: true, type: true } } },
         },
@@ -41,7 +43,13 @@ export async function GET(_req: Request, { params }: { params: Params }) {
       return NextResponse.json({ error: "Agendamento não encontrado." }, { status: 404 });
     }
 
-    return NextResponse.json({ ...schedule, sources: schedule.sources.map((s) => s.source) });
+    await assertSectorAccess(tenant.userId, organizationId, schedule.sectorId, tenant.role, "VIEWER_DOWNLOAD");
+
+    return NextResponse.json({
+      ...schedule,
+      sectorName: schedule.sector?.name || "Sem Secretaria",
+      sources: schedule.sources.map((s) => s.source),
+    });
   } catch (err: unknown) {
     if (err instanceof Error && err.message.includes("Unauthorized"))
       return NextResponse.json({ error: err.message }, { status: 401 });
@@ -55,7 +63,8 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
     const organizationId = tenant.organizationId!;
     const { id } = await params;
 
-    await prisma.backupSchedule.findFirstOrThrow({ where: { id, organizationId } });
+    const existing = await prisma.backupSchedule.findFirstOrThrow({ where: { id, organizationId } });
+    await assertSectorAccess(tenant.userId, organizationId, existing.sectorId, tenant.role, "EDITOR");
 
     const body = await request.json();
     const result = updateScheduleSchema.safeParse(body);
@@ -64,9 +73,33 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
     }
 
     const { sourceIds, ...rest } = result.data;
+    let newSectorId = existing.sectorId;
+
+    if (sourceIds) {
+      const sources = await prisma.backupSource.findMany({
+        where: { id: { in: sourceIds }, organizationId, deletedAt: null },
+      });
+      if (sources.length !== sourceIds.length) {
+        return NextResponse.json({ error: "Uma ou mais origens fornecidas são inválidas." }, { status: 400 });
+      }
+
+      const sectorIds = Array.from(new Set(sources.map((s) => s.sectorId).filter(Boolean)));
+      if (sectorIds.length > 1) {
+        return NextResponse.json(
+          { error: "Todas as origens de um agendamento devem pertencer à mesma Secretaria." },
+          { status: 400 }
+        );
+      }
+      newSectorId = sectorIds[0] ?? null;
+
+      if (newSectorId) {
+        await assertSectorAccess(tenant.userId, organizationId, newSectorId, tenant.role, "EDITOR");
+      }
+    }
 
     const updateData = {
       ...rest,
+      sectorId: newSectorId,
       ...(sourceIds
         ? {
             sources: {
@@ -75,12 +108,13 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
             },
           }
         : {}),
-    } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    } as any;
 
     const schedule = await prisma.backupSchedule.update({
       where: { id },
       data: updateData,
       include: {
+        sector: { select: { id: true, name: true } },
         sources: {
           include: { source: { select: { id: true, name: true, type: true } } },
         },
@@ -93,13 +127,18 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
       action: "SCHEDULE_UPDATE",
       resourceType: "BackupSchedule",
       resourceId: id,
+      metadata: { id, sectorId: schedule.sectorId },
     });
 
     const includedSchedule = schedule as typeof schedule & {
       sources: Array<{ source: { id: string; name: string; type: string } }>;
     };
 
-    return NextResponse.json({ ...schedule, sources: includedSchedule.sources.map((s) => s.source) });
+    return NextResponse.json({
+      ...schedule,
+      sectorName: schedule.sector?.name || "Sem Secretaria",
+      sources: includedSchedule.sources.map((s) => s.source),
+    });
   } catch (err: unknown) {
     if (err instanceof Error && err.message.includes("Unauthorized"))
       return NextResponse.json({ error: err.message }, { status: 401 });
@@ -113,7 +152,9 @@ export async function DELETE(_req: Request, { params }: { params: Params }) {
     const organizationId = tenant.organizationId!;
     const { id } = await params;
 
-    await prisma.backupSchedule.findFirstOrThrow({ where: { id, organizationId } });
+    const schedule = await prisma.backupSchedule.findFirstOrThrow({ where: { id, organizationId } });
+    await assertSectorAccess(tenant.userId, organizationId, schedule.sectorId, tenant.role, "ADMIN");
+
     await prisma.backupSchedule.delete({ where: { id } });
 
     await writeAudit({
@@ -122,6 +163,7 @@ export async function DELETE(_req: Request, { params }: { params: Params }) {
       action: "SCHEDULE_DELETE",
       resourceType: "BackupSchedule",
       resourceId: id,
+      metadata: { id, sectorId: schedule.sectorId },
     });
 
     return NextResponse.json({ success: true });

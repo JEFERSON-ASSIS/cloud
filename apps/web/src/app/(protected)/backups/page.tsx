@@ -38,11 +38,14 @@ import {
 import { PageHeader } from "@/components/PageHeader/PageHeader";
 
 type Server = { id: string; name: string; host: string };
+type Sector = { id: string; name: string };
 
 type BackupSource = {
   id: string;
   name: string;
   type: "MYSQL" | "POSTGRESQL" | "DOCKER_VOLUME" | "DIRECTORY";
+  sectorId?: string | null;
+  sectorName?: string;
   serverId: string | null;
   serverName: string;
   active: boolean;
@@ -59,6 +62,7 @@ type BackupRun = {
   completedAt: string | null;
   durationMs: number | null;
   errorMessage: string | null;
+  sectorName?: string;
   source: { name: string; type: string };
 };
 
@@ -72,6 +76,7 @@ type BackupLog = {
 export default function BackupsPage() {
   const [tab, setTab] = useState(0);
   const [servers, setServers] = useState<Server[]>([]);
+  const [sectors, setSectors] = useState<Sector[]>([]);
   const [sources, setSources] = useState<BackupSource[]>([]);
   const [runs, setRuns] = useState<BackupRun[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,6 +94,7 @@ export default function BackupsPage() {
   // Form states
   const [name, setName] = useState("");
   const [type, setType] = useState<"MYSQL" | "POSTGRESQL" | "DOCKER_VOLUME" | "DIRECTORY">("MYSQL");
+  const [sectorId, setSectorId] = useState<string>("");
   const [serverId, setServerId] = useState<string>("");
   
   // Configs
@@ -102,16 +108,24 @@ export default function BackupsPage() {
   const loadData = async (showProgress = true) => {
     if (showProgress) setLoading(true);
     try {
-      const [resServers, resSources, resRuns] = await Promise.all([
+      const [resServers, resSectors, resSources, resRuns] = await Promise.all([
         fetch("/api/servers"),
+        fetch("/api/sectors"),
         fetch("/api/backup-sources"),
         fetch("/api/backup-runs"),
       ]);
       const dataServers = await resServers.json();
+      const dataSectors = await resSectors.json();
       const dataSources = await resSources.json();
       const dataRuns = await resRuns.json();
 
       if (resServers.ok) setServers(dataServers);
+      if (resSectors.ok && Array.isArray(dataSectors)) {
+        setSectors(dataSectors);
+        if (dataSectors.length > 0 && !sectorId) {
+          setSectorId(dataSectors[0].id);
+        }
+      }
       if (resSources.ok) setSources(dataSources);
       if (resRuns.ok) setRuns(dataRuns);
     } catch {
@@ -156,6 +170,7 @@ export default function BackupsPage() {
     setEditingSource(null);
     setName("");
     setType("MYSQL");
+    if (sectors.length > 0 && sectors[0]) setSectorId(sectors[0].id);
     setServerId("");
     setDbName("");
     setDbUser("");
@@ -176,6 +191,7 @@ export default function BackupsPage() {
         setEditingSource(data);
         setName(data.name);
         setType(data.type);
+        setSectorId(data.sectorId || (sectors[0]?.id ?? ""));
         setServerId(data.serverId || "");
         
         const conf = data.config || {};
@@ -216,6 +232,7 @@ export default function BackupsPage() {
       const payload = {
         name,
         type,
+        sectorId: sectorId || undefined,
         serverId: serverId || null,
         config,
       };
@@ -486,6 +503,22 @@ export default function BackupsPage() {
               onChange={(e) => setName(e.target.value)}
               placeholder="ex: Banco MySQL de Produção"
             />
+
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+                Secretaria *
+              </Typography>
+              <Select
+                fullWidth
+                value={sectorId}
+                onChange={(e) => setSectorId(e.target.value)}
+                disabled={!!editingSource}
+              >
+                {sectors.map((s) => (
+                  <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>
+                ))}
+              </Select>
+            </Box>
             <Box>
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
                 Tipo

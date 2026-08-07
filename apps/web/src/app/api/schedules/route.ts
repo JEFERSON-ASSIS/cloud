@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
 import { writeAudit } from "@/server/audit";
+import { assertSectorAccess, getUserSectorIds } from "@/server/sector-access";
 import { z } from "zod";
 
 const createScheduleSchema = z.object({
@@ -19,13 +20,23 @@ export async function GET() {
   try {
     const tenant = await requireTenant("backup.read");
     const organizationId = tenant.organizationId!;
+    const allowedSectorIds = await getUserSectorIds(tenant.userId, organizationId, tenant.role);
+
+    const whereClause: any = { organizationId };
+    if (allowedSectorIds !== null) {
+      whereClause.OR = [
+        { sectorId: { in: allowedSectorIds } },
+        { sectorId: null },
+      ];
+    }
 
     const schedules = await prisma.backupSchedule.findMany({
-      where: { organizationId },
+      where: whereClause,
       include: {
+        sector: { select: { id: true, name: true } },
         sources: {
           include: {
-            source: { select: { id: true, name: true, type: true } },
+            source: { select: { id: true, name: true, type: true, sectorId: true } },
           },
         },
         runs: {
@@ -40,6 +51,7 @@ export async function GET() {
     return NextResponse.json(
       schedules.map((s) => ({
         ...s,
+        sectorName: s.sector?.name || "Sem Secretaria",
         sources: s.sources.map((ss) => ss.source),
         lastRun: s.runs[0] ?? null,
       }))
@@ -64,7 +76,6 @@ export async function POST(request: Request) {
 
     const { name, frequency, time, timezone, retentionDaily, retentionWeekly, retentionMonthly, sourceIds } = result.data;
 
-    // Verificar que todas as fontes pertencem à organização
     const sources = await prisma.backupSource.findMany({
       where: { id: { in: sourceIds }, organizationId, deletedAt: null },
     });
@@ -72,9 +83,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Uma ou mais origens de backup são inválidas." }, { status: 400 });
     }
 
+    const sectorIds = Array.from(new Set(sources.map((s) => s.sectorId).filter(Boolean)));
+    if (sectorIds.length > 1) {
+      return NextResponse.json(
+        { error: "Todas as origens de um agendamento devem pertencer à mesma Secretaria." },
+        { status: 400 }
+      );
+    }
+    const scheduleSectorId = sectorIds[0] ?? null;
+
+    if (scheduleSectorId) {
+      await assertSectorAccess(tenant.userId, organizationId, scheduleSectorId, tenant.role, "EDITOR");
+    }
+
     const schedule = await prisma.backupSchedule.create({
       data: {
         organizationId,
+        sectorId: scheduleSectorId,
         name,
         frequency,
         time,
@@ -87,6 +112,7 @@ export async function POST(request: Request) {
         },
       },
       include: {
+        sector: { select: { id: true, name: true } },
         sources: {
           include: { source: { select: { id: true, name: true, type: true } } },
         },
@@ -99,12 +125,17 @@ export async function POST(request: Request) {
       action: "SCHEDULE_CREATE",
       resourceType: "BackupSchedule",
       resourceId: schedule.id,
+      metadata: { name, scheduleSectorId },
     });
 
-    return NextResponse.json({ ...schedule, sources: schedule.sources.map((s) => s.source) }, { status: 201 });
+    return NextResponse.json(
+      { ...schedule, sectorName: schedule.sector?.name || "Sem Secretaria", sources: schedule.sources.map((s) => s.source) },
+      { status: 201 }
+    );
   } catch (err: unknown) {
     if (err instanceof Error && err.message.includes("Unauthorized"))
       return NextResponse.json({ error: err.message }, { status: 401 });
-    return NextResponse.json({ error: "Erro ao criar agendamento." }, { status: 500 });
+    const msg = err instanceof Error ? err.message : "Erro ao criar agendamento.";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

@@ -440,13 +440,55 @@ const backupWorker = new Worker(
       const drive = new GoogleDriveStorageProvider(accessToken);
       const filename = `${source.name.toLowerCase().replace(/\s+/g, "-")}-${new Date().toISOString().split("T")[0]}-${Date.now()}.sql.gz.enc`;
       
-      await log("INFO", `Iniciando upload do backup criptografado (${filename}) para o Google Drive...`);
+      let targetDriveFolderId: string | undefined = connection.googleDrive.rootFolderId || undefined;
+      const runSectorId = run.sectorId || source.sectorId;
+
+      if (runSectorId) {
+        const sectorObj = await prisma.sector.findUnique({ where: { id: runSectorId } });
+        if (sectorObj) {
+          let storageSpace = await prisma.storageSpace.findFirst({
+            where: { organizationId, sectorId: runSectorId, deletedAt: null },
+          });
+
+          let sectorDriveFolderId = storageSpace?.rootFolderId;
+          if (!sectorDriveFolderId && connection.googleDrive.rootFolderId) {
+            sectorDriveFolderId = await drive.createFolder(sectorObj.name, connection.googleDrive.rootFolderId);
+            if (storageSpace) {
+              await prisma.storageSpace.update({
+                where: { id: storageSpace.id },
+                data: { rootFolderId: sectorDriveFolderId },
+              });
+            } else {
+              storageSpace = await prisma.storageSpace.create({
+                data: {
+                  organizationId,
+                  sectorId: runSectorId,
+                  name: sectorObj.name,
+                  rootFolderId: sectorDriveFolderId,
+                },
+              });
+            }
+          }
+
+          if (sectorDriveFolderId) {
+            const existingItems = await drive.list(sectorDriveFolderId);
+            const existingBackupsFolder = existingItems.find((i) => i.name === "Backups");
+            if (existingBackupsFolder) {
+              targetDriveFolderId = existingBackupsFolder.id;
+            } else {
+              targetDriveFolderId = await drive.createFolder("Backups", sectorDriveFolderId);
+            }
+          }
+        }
+      }
+
+      await log("INFO", `Iniciando upload do backup criptografado (${filename}) para a pasta da Secretaria no Google Drive...`);
       const readableStream = createReadStream(encryptedTempFilePath);
       
       const stored = await drive.upload(
         readableStream,
         filename,
-        connection.googleDrive.rootFolderId || undefined,
+        targetDriveFolderId,
         "application/octet-stream"
       );
 
@@ -456,6 +498,7 @@ const backupWorker = new Worker(
       const backupFile = await prisma.backupFile.create({
         data: {
           backupRunId: runId,
+          sectorId: runSectorId,
           storageConnectionId: connection.id,
           name: filename,
           remoteFileId: stored.id,
@@ -582,7 +625,7 @@ async function syncScheduler() {
       where: { active: true },
       include: {
         sources: {
-          include: { source: { select: { id: true, organizationId: true, active: true, deletedAt: true } } },
+          include: { source: { select: { id: true, name: true, organizationId: true, sectorId: true, active: true, deletedAt: true } } },
         },
       },
     });
@@ -613,10 +656,27 @@ async function syncScheduler() {
           const source = scheduleSource.source;
           if (!source.active || source.deletedAt) continue;
 
+          if (source.organizationId !== schedule.organizationId) {
+            console.error(`[Scheduler] Rejeitado: Organização da Origem (${source.organizationId}) difere do Agendamento (${schedule.organizationId}).`);
+            continue;
+          }
+
+          const resolvedSectorId = source.sectorId || schedule.sectorId;
+          if (!resolvedSectorId) {
+            console.error(`[Scheduler] Rejeitado: Origem (${source.name}) ou Agendamento (${schedule.name}) sem Secretaria associada.`);
+            continue;
+          }
+
+          if (source.sectorId && schedule.sectorId && source.sectorId !== schedule.sectorId) {
+            console.error(`[Scheduler] Rejeitado: Inconsistência de Secretaria entre a Origem (${source.sectorId}) e o Agendamento (${schedule.sectorId}).`);
+            continue;
+          }
+
           try {
             const run = await prisma.backupRun.create({
               data: {
                 organizationId: source.organizationId,
+                sectorId: resolvedSectorId,
                 sourceId: source.id,
                 scheduleId: schedule.id,
                 status: "PENDING",
@@ -625,7 +685,7 @@ async function syncScheduler() {
             });
 
             await addBackupJob(run.id, source.id);
-            console.info(`[Scheduler] Job de backup enfileirado: run=${run.id} source=${source.id}`);
+            console.info(`[Scheduler] Job de backup enfileirado com sucesso: run=${run.id} source=${source.id} sector=${resolvedSectorId}`);
           } catch (err) {
             console.error(`[Scheduler] Erro ao enfileirar backup para source ${source.id}:`, err);
           }

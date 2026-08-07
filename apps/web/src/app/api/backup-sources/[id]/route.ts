@@ -3,6 +3,7 @@ import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
 import { encryptSecret, decryptSecret } from "@/server/encryption";
 import { writeAudit } from "@/server/audit";
+import { assertSectorAccess } from "@/server/sector-access";
 import { addBackupJob } from "@i7ai/backup-core";
 import { z } from "zod";
 
@@ -30,7 +31,8 @@ export async function GET(request: Request, { params }: { params: Params }) {
       },
     });
 
-    // Descriptografar config
+    await assertSectorAccess(tenant.userId, organizationId, source.sectorId, tenant.role, "VIEWER_DOWNLOAD");
+
     let config = {};
     if (source.encryptedConfig && typeof source.encryptedConfig === "object") {
       const { ciphertext } = source.encryptedConfig as { ciphertext?: string };
@@ -43,6 +45,7 @@ export async function GET(request: Request, { params }: { params: Params }) {
       id: source.id,
       name: source.name,
       type: source.type,
+      sectorId: source.sectorId,
       serverId: source.serverId,
       serverName: source.server?.name || "Local",
       active: source.active,
@@ -61,10 +64,11 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
     const organizationId = tenant.organizationId!;
     const { id } = await params;
 
-    // Verificar se existe
-    await prisma.backupSource.findFirstOrThrow({
+    const source = await prisma.backupSource.findFirstOrThrow({
       where: { id, organizationId, deletedAt: null },
     });
+
+    await assertSectorAccess(tenant.userId, organizationId, source.sectorId, tenant.role, "EDITOR");
 
     const body = await request.json();
     const result = updateSourceSchema.safeParse(body);
@@ -103,13 +107,14 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
       action: "BACKUP_SOURCE_UPDATE",
       resourceType: "BACKUP_SOURCE",
       resourceId: id,
-      metadata: { id, name: updated.name },
+      metadata: { id, name: updated.name, sectorId: updated.sectorId },
     });
 
     return NextResponse.json({
       id: updated.id,
       name: updated.name,
       type: updated.type,
+      sectorId: updated.sectorId,
       serverId: updated.serverId,
       active: updated.active,
     });
@@ -129,6 +134,8 @@ export async function DELETE(request: Request, { params }: { params: Params }) {
       where: { id, organizationId, deletedAt: null },
     });
 
+    await assertSectorAccess(tenant.userId, organizationId, source.sectorId, tenant.role, "ADMIN");
+
     await prisma.backupSource.update({
       where: { id },
       data: { deletedAt: new Date() },
@@ -140,7 +147,7 @@ export async function DELETE(request: Request, { params }: { params: Params }) {
       action: "BACKUP_SOURCE_DELETE",
       resourceType: "BACKUP_SOURCE",
       resourceId: id,
-      metadata: { id, name: source.name },
+      metadata: { id, name: source.name, sectorId: source.sectorId },
     });
 
     return NextResponse.json({ success: true });
@@ -161,9 +168,12 @@ export async function POST(request: Request, { params }: { params: Params }) {
       where: { id, organizationId, deletedAt: null },
     });
 
+    await assertSectorAccess(tenant.userId, organizationId, source.sectorId, tenant.role, "EDITOR");
+
     const run = await prisma.backupRun.create({
       data: {
         organizationId,
+        sectorId: source.sectorId,
         sourceId: id,
         status: "PENDING",
         progress: 0,
@@ -172,7 +182,6 @@ export async function POST(request: Request, { params }: { params: Params }) {
       },
     });
 
-    // Adicionar job à fila BullMQ
     await addBackupJob(run.id, source.id);
 
     await writeAudit({
@@ -181,7 +190,7 @@ export async function POST(request: Request, { params }: { params: Params }) {
       action: "BACKUP_STARTED",
       resourceType: "BACKUP_RUN",
       resourceId: run.id,
-      metadata: { sourceId: id, sourceName: source.name },
+      metadata: { sourceId: id, sourceName: source.name, sectorId: source.sectorId },
     });
 
     return NextResponse.json(run);
