@@ -1,4 +1,5 @@
 "use client";
+
 import { useState, useEffect, type PropsWithChildren } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -78,10 +79,10 @@ export function AppShell({ children }: PropsWithChildren) {
   const [collapsed, setCollapsed] = useState(
     () =>
       typeof window !== "undefined" &&
-      localStorage.getItem("sidebar-collapsed") === "true",
+      localStorage.getItem("sidebar-collapsed") === "true"
   );
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  
+
   const [sectors, setSectors] = useState<{ id: string; name: string }[]>([]);
   const [activeSectorId, setActiveSectorId] = useState<string>("");
 
@@ -118,8 +119,16 @@ export function AppShell({ children }: PropsWithChildren) {
     });
 
   const drawer = (
-    <Box sx={{ height: "100%", bgcolor: "#101827", color: "#D8E1EF" }}>
-      <Toolbar sx={{ px: 2.25, gap: 1.5 }}>
+    <Box
+      sx={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        bgcolor: "#101827",
+        color: "#D8E1EF",
+      }}
+    >
+      <Toolbar sx={{ px: 2.25, gap: 1.5, flexShrink: 0 }}>
         <Box
           sx={{
             width: 36,
@@ -129,18 +138,21 @@ export function AppShell({ children }: PropsWithChildren) {
             display: "grid",
             placeItems: "center",
             fontWeight: 800,
+            color: "white",
           }}
         >
           i7
         </Box>
         {!collapsed && (
-          <Typography color="white" sx={{ fontWeight: 750 }}>
+          <Typography color="white" sx={{ fontWeight: 750, fontSize: 16 }}>
             Cloud Manager
           </Typography>
         )}
       </Toolbar>
+
       <Divider sx={{ borderColor: "rgba(255,255,255,.08)" }} />
-      <List sx={{ p: 1.25 }}>
+
+      <List sx={{ p: 1.25, flex: 1, overflowY: "auto" }}>
         {items.map(([label, href, icon]) => (
           <Tooltip key={href} title={collapsed ? label : ""} placement="right">
             <ListItemButton
@@ -181,21 +193,69 @@ export function AppShell({ children }: PropsWithChildren) {
           </Tooltip>
         ))}
       </List>
-      {!mobile && (
-        <IconButton
-          aria-label="Recolher menu"
-          onClick={toggleCollapsed}
-          sx={{
-            position: "absolute",
-            bottom: 18,
-            right: 18,
-            color: "inherit",
-            transform: collapsed ? "rotate(180deg)" : "none",
-          }}
-        >
-          <ChevronLeft />
-        </IconButton>
-      )}
+
+      <Divider sx={{ borderColor: "rgba(255,255,255,.08)" }} />
+
+      {/* Seção Inferior com o Botão Sair */}
+      <Box sx={{ p: 1.25, flexShrink: 0 }}>
+        <Tooltip title={collapsed ? "Sair da Conta" : ""} placement="right">
+          <ListItemButton
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            sx={{
+              borderRadius: 2.5,
+              minHeight: 46,
+              color: "#EF4444",
+              "&:hover": {
+                bgcolor: "rgba(239, 68, 68, 0.12)",
+                color: "#F87171",
+              },
+            }}
+          >
+            <ListItemIcon
+              sx={{
+                minWidth: collapsed ? 0 : 42,
+                color: "inherit",
+                justifyContent: "center",
+              }}
+            >
+              <Logout fontSize="small" />
+            </ListItemIcon>
+            {!collapsed && (
+              <ListItemText
+                primary={
+                  <Typography sx={{ fontSize: 14, fontWeight: 600 }}>
+                    Sair
+                  </Typography>
+                }
+                secondary={
+                  <Typography
+                    noWrap
+                    sx={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}
+                  >
+                    {data?.user?.email}
+                  </Typography>
+                }
+              />
+            )}
+          </ListItemButton>
+        </Tooltip>
+
+        {!mobile && (
+          <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1 }}>
+            <IconButton
+              aria-label="Recolher menu"
+              onClick={toggleCollapsed}
+              sx={{
+                color: "rgba(255,255,255,0.5)",
+                transform: collapsed ? "rotate(180deg)" : "none",
+                "&:hover": { color: "white" },
+              }}
+            >
+              <ChevronLeft />
+            </IconButton>
+          </Box>
+        )}
+      </Box>
     </Box>
   );
 
@@ -217,6 +277,7 @@ export function AppShell({ children }: PropsWithChildren) {
       >
         {drawer}
       </Drawer>
+
       <Box sx={{ flex: 1, minWidth: 0 }}>
         <AppBar
           position="sticky"
@@ -234,6 +295,7 @@ export function AppShell({ children }: PropsWithChildren) {
                 <MenuIcon />
               </IconButton>
             )}
+
             <Box
               sx={{
                 bgcolor: "action.hover",
@@ -251,6 +313,7 @@ export function AppShell({ children }: PropsWithChildren) {
                 sx={{ ml: 1, flex: 1 }}
               />
             </Box>
+
             <Select
               size="small"
               value={data?.user.organizationId ?? ""}
@@ -282,6 +345,7 @@ export function AppShell({ children }: PropsWithChildren) {
                 <NotificationsNone />
               </IconButton>
             </Tooltip>
+
             <Tooltip title="Alternar tema">
               <IconButton
                 aria-label="Alternar tema"
@@ -292,11 +356,13 @@ export function AppShell({ children }: PropsWithChildren) {
                 {effectiveMode === "dark" ? <LightMode /> : <DarkMode />}
               </IconButton>
             </Tooltip>
+
             <IconButton onClick={(event) => setAnchor(event.currentTarget)}>
               <Avatar sx={{ width: 34, height: 34 }}>
                 {data?.user.name?.[0] ?? "U"}
               </Avatar>
             </IconButton>
+
             <Menu
               anchorEl={anchor}
               open={Boolean(anchor)}
@@ -305,11 +371,12 @@ export function AppShell({ children }: PropsWithChildren) {
               <MenuItem disabled>{data?.user.email}</MenuItem>
               <MenuItem onClick={() => signOut({ callbackUrl: "/login" })}>
                 <Logout fontSize="small" sx={{ mr: 1 }} />
-                Sair
+                Sair da conta
               </MenuItem>
             </Menu>
           </Toolbar>
         </AppBar>
+
         <Box
           component="main"
           sx={{ p: { xs: 2, md: 3.5 }, maxWidth: 1600, mx: "auto" }}
@@ -320,4 +387,3 @@ export function AppShell({ children }: PropsWithChildren) {
     </Box>
   );
 }
-
