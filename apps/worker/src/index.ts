@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { createWriteStream, unlinkSync, existsSync, mkdirSync, createReadStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
-import { exec, execFile } from "node:child_process";
+import { exec, spawn } from "node:child_process";
 import { createGzip } from "node:zlib";
 import { promisify } from "node:util";
 import path from "node:path";
@@ -388,37 +388,86 @@ const backupWorker = new Worker(
           });
         });
       } else {
-        // Executar localmente via execFile seguro (sem passar pela shell)
+        // spawn + pipe: dump grande não cabe no maxBuffer do execFile (ERR_CHILD_PROCESS_STDIO_MAXBUFFER)
         const safeArgs = execArgs.map((arg) => (rawPassword && arg.includes(rawPassword) ? "[PASSWORD_REDACTED]" : arg));
         await log("INFO", `Executando dump local seguro: ${execCommand} ${safeArgs.join(" ")}`);
         const writeStream = createWriteStream(localTempFilePath);
 
         await new Promise<void>((resolve, reject) => {
-          const child = execFile(
-            execCommand,
-            execArgs,
-            { env: { ...process.env, ...extraEnv } },
-            (err) => {
-              if (err && err.code !== 0) {
-                reject(new Error(sanitizeText(`Comando "${execCommand}" falhou com código ${err.code ?? 1}: ${err.message}`)));
-              }
-            }
-          );
+          let settled = false;
+          let exitCode: number | null = null;
+          let fileDone = false;
 
-          child.stderr?.on("data", (data) => {
+          const settle = () => {
+            if (settled || exitCode === null || !fileDone) return;
+            settled = true;
+            if (exitCode !== 0) {
+              reject(
+                new Error(
+                  sanitizeText(`Comando "${execCommand}" falhou com código ${exitCode}`),
+                ),
+              );
+              return;
+            }
+            resolve();
+          };
+
+          const fail = (error: Error) => {
+            if (settled) return;
+            settled = true;
+            try {
+              writeStream.destroy();
+            } catch {
+              // ignore
+            }
+            reject(error);
+          };
+
+          const child = spawn(execCommand, execArgs, {
+            env: { ...process.env, ...extraEnv },
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+
+          child.stderr?.on("data", (data: Buffer) => {
             const msg = sanitizeText(data.toString().trim());
             if (msg) void log("WARNING", `[stderr] ${msg}`);
           });
 
-          if (isAlreadyCompressed) {
-            child.stdout?.pipe(writeStream);
-          } else {
-            const gzip = createGzip();
-            child.stdout?.pipe(gzip).pipe(writeStream);
+          child.on("error", (err) => {
+            fail(new Error(sanitizeText(`Falha ao iniciar "${execCommand}": ${err.message}`)));
+          });
+
+          child.on("close", (code) => {
+            exitCode = code ?? 1;
+            if (exitCode !== 0) {
+              fail(
+                new Error(
+                  sanitizeText(`Comando "${execCommand}" falhou com código ${exitCode}`),
+                ),
+              );
+              return;
+            }
+            settle();
+          });
+
+          writeStream.on("finish", () => {
+            fileDone = true;
+            settle();
+          });
+          writeStream.on("error", (err) => fail(new Error(sanitizeText(err.message))));
+
+          if (!child.stdout) {
+            fail(new Error(`Comando "${execCommand}" não produziu stdout.`));
+            return;
           }
 
-          writeStream.on("finish", () => resolve());
-          writeStream.on("error", (err) => reject(new Error(sanitizeText(err.message))));
+          if (isAlreadyCompressed) {
+            child.stdout.pipe(writeStream);
+          } else {
+            const gzip = createGzip();
+            gzip.on("error", (err) => fail(new Error(sanitizeText(err.message))));
+            child.stdout.pipe(gzip).pipe(writeStream);
+          }
         });
       }
 
