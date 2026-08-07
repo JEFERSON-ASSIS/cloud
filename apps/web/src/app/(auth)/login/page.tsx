@@ -95,14 +95,13 @@ export default function LoginPage() {
               <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
                 <Box
                   component="img"
-                  src="/i7ai-logo-white.jpg"
-                  alt="i7AI Sistemas Inteligentes"
+                  src="/i7ai-logo.png"
+                  alt="I7AI Sistemas Inteligentes"
                   sx={{
                     width: 140,
                     height: "auto",
                     display: "block",
-                    borderRadius: 2,
-                    boxShadow: "0 0 25px rgba(99, 102, 241, 0.3)",
+                    filter: "drop-shadow(0 0 20px rgba(99, 102, 241, 0.4))",
                   }}
                 />
               </Box>
