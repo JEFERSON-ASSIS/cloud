@@ -192,7 +192,7 @@ function LoginContent() {
                 trajetória e a segurança de dados de cada departamento em uma única plataforma.
               </Typography>
 
-              {/* 3 Cards Cloud Manager no Rodapé */}
+              {/* 3 Cards Cloud Manager no Rodapé - Normas Rígidas & LGPD */}
               <Grid container spacing={1.5} sx={{ pt: 0.5, width: "100%" }}>
                 <Grid size={{ xs: 12, sm: 4 }}>
                   <Box
@@ -200,7 +200,7 @@ function LoginContent() {
                       p: { xs: 1.5, lg: 2 },
                       borderRadius: 2.5,
                       bgcolor: "rgba(255, 255, 255, 0.04)",
-                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      border: "1px solid rgba(99, 102, 241, 0.25)",
                       height: "100%",
                       textAlign: "left",
                     }}
@@ -220,10 +220,10 @@ function LoginContent() {
                       <ShieldOutlined sx={{ fontSize: 17 }} />
                     </Box>
                     <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "white", mb: 0.25, fontSize: 12.5 }}>
-                      Gestão Pública Integrada
+                      Criptografia AES-256
                     </Typography>
                     <Typography variant="caption" sx={{ color: "#94a3b8", lineHeight: 1.3, display: "block", fontSize: 10.5 }}>
-                      Registros, secretarias e backups organizados no mesmo fluxo.
+                      Backups e credenciais protegidos com algoritmos de nível governamental.
                     </Typography>
                   </Box>
                 </Grid>
@@ -234,7 +234,7 @@ function LoginContent() {
                       p: { xs: 1.5, lg: 2 },
                       borderRadius: 2.5,
                       bgcolor: "rgba(255, 255, 255, 0.04)",
-                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      border: "1px solid rgba(16, 185, 129, 0.3)",
                       height: "100%",
                       textAlign: "left",
                     }}
@@ -254,10 +254,10 @@ function LoginContent() {
                       <VerifiedUserOutlined sx={{ fontSize: 17 }} />
                     </Box>
                     <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "white", mb: 0.25, fontSize: 12.5 }}>
-                      Segurança & Controle
+                      Conformidade LGPD
                     </Typography>
                     <Typography variant="caption" sx={{ color: "#94a3b8", lineHeight: 1.3, display: "block", fontSize: 10.5 }}>
-                      Perfis e permissões para proteger informações institucionais.
+                      Trilha de auditoria contínua, privacidade e rastreabilidade total (Lei 13.709/18).
                     </Typography>
                   </Box>
                 </Grid>
@@ -268,7 +268,7 @@ function LoginContent() {
                       p: { xs: 1.5, lg: 2 },
                       borderRadius: 2.5,
                       bgcolor: "rgba(255, 255, 255, 0.04)",
-                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      border: "1px solid rgba(99, 102, 241, 0.25)",
                       height: "100%",
                       textAlign: "left",
                     }}
@@ -288,10 +288,10 @@ function LoginContent() {
                       <BackupOutlined sx={{ fontSize: 17 }} />
                     </Box>
                     <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "white", mb: 0.25, fontSize: 12.5 }}>
-                      Continuidade & Recovery
+                      Isolamento & Recovery
                     </Typography>
                     <Typography variant="caption" sx={{ color: "#94a3b8", lineHeight: 1.3, display: "block", fontSize: 10.5 }}>
-                      Histórico preservado para decisões mais seguras ao longo da jornada.
+                      Multitenancy seguro por secretaria e retenção automatizada sem acúmulo de dados.
                     </Typography>
                   </Box>
                 </Grid>
