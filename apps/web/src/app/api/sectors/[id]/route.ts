@@ -106,7 +106,7 @@ export async function DELETE(
 
       if (storageSpace?.rootFolderId) {
         const connection = await prisma.storageConnection.findFirst({
-          where: { organizationId, provider: "GOOGLE_DRIVE", status: "CONNECTED", deletedAt: null },
+          where: { provider: "GOOGLE_DRIVE", status: "CONNECTED", deletedAt: null },
           include: { googleDrive: true },
         });
 

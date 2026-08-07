@@ -68,20 +68,17 @@ export async function DELETE(
     // Tentar deletar a pasta inteira da Empresa no Google Drive para nao deixar lixo
     try {
       const connection = await prisma.storageConnection.findFirst({
-        where: { organizationId: id, provider: "GOOGLE_DRIVE", status: "CONNECTED", deletedAt: null },
+        where: { provider: "GOOGLE_DRIVE", status: "CONNECTED", deletedAt: null },
         include: { googleDrive: true },
       });
 
       if (connection?.googleDrive) {
         const accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
         const drive = new GoogleDriveStorageProvider(accessToken);
-        let orgFolderId = connection.googleDrive.rootFolderId || undefined;
-        if (!orgFolderId) {
-          const rootItems = await drive.list("root");
-          orgFolderId = rootItems.find((i) => i.name === org.name)?.id;
-        }
-        if (orgFolderId) {
-          await drive.delete(orgFolderId);
+        const rootItems = await drive.list("root");
+        const matchingFolders = rootItems.filter((i) => i.name === org.name);
+        for (const folder of matchingFolders) {
+          await drive.delete(folder.id);
         }
       }
     } catch (errDrive) {
