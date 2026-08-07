@@ -3,6 +3,7 @@ import { prisma } from "@i7ai/database";
 import { z } from "zod";
 import { requireTenant } from "@/server/tenant";
 import { canAssignOrganizationRole, resolveManagedOrganizationId } from "@/server/user-memberships";
+import { defaultSectorRoleForOrgRole } from "@/server/document-access";
 
 const createUserSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -128,13 +129,14 @@ export async function POST(request: Request) {
         },
       });
 
+      const sectorRole = defaultSectorRoleForOrgRole(data.role);
       for (const sector of sectors) await tx.sectorUser.upsert({
         where: { sectorId_userId: { sectorId: sector.id, userId: created.id } },
-        update: {},
+        update: { role: sectorRole },
         create: {
           sectorId: sector.id,
           userId: created.id,
-          role: "VIEWER_DOWNLOAD",
+          role: sectorRole,
         },
       });
 

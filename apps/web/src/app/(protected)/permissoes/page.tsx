@@ -10,6 +10,8 @@ import {
   CircularProgress,
   Paper,
   Stack,
+  Tab,
+  Tabs,
   Table,
   TableBody,
   TableCell,
@@ -20,16 +22,17 @@ import {
 import { Save } from "@mui/icons-material";
 import { PageHeader } from "@/components/PageHeader/PageHeader";
 import { editableRoleNames, type MenuKey } from "@/lib/nav-items";
+import type { PermissionCatalogItem } from "@/lib/permission-catalog";
 
-type CatalogItem = {
+type MenuCatalogItem = {
   key: MenuKey;
   label: string;
   href: string;
   assignable: boolean;
 };
 
-type MatrixResponse = {
-  catalog: CatalogItem[];
+type MatrixResponse<T> = {
+  catalog: T[];
   roles: typeof editableRoleNames[number][];
   matrix: Record<string, string[]>;
   error?: string;
@@ -42,31 +45,51 @@ const roleLabels: Record<string, string> = {
   VIEWER: "Visualizador",
 };
 
+type TabKey = "menu" | "api";
+
 export default function PermissoesPage() {
   const { data: session } = useSession();
-  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
-  const [matrix, setMatrix] = useState<Record<string, string[]>>({});
+  const [tab, setTab] = useState<TabKey>("menu");
+
+  const [menuCatalog, setMenuCatalog] = useState<MenuCatalogItem[]>([]);
+  const [menuMatrix, setMenuMatrix] = useState<Record<string, string[]>>({});
+  const [permCatalog, setPermCatalog] = useState<PermissionCatalogItem[]>([]);
+  const [permMatrix, setPermMatrix] = useState<Record<string, string[]>>({});
+
   const [loading, setLoading] = useState(true);
   const [savingRole, setSavingRole] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
   const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
+  const roles = useMemo(() => [...editableRoleNames], []);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/roles/menu-permissions");
-      const body = (await res.json()) as MatrixResponse;
-      if (!res.ok) {
-        setError(body.error || "Não foi possível carregar as permissões de menu.");
+      const [menuRes, permRes] = await Promise.all([
+        fetch("/api/roles/menu-permissions"),
+        fetch("/api/roles/permissions"),
+      ]);
+      const menuBody = (await menuRes.json()) as MatrixResponse<MenuCatalogItem>;
+      const permBody = (await permRes.json()) as MatrixResponse<PermissionCatalogItem>;
+
+      if (!menuRes.ok) {
+        setError(menuBody.error || "Não foi possível carregar as permissões de menu.");
         return;
       }
-      setCatalog(body.catalog.filter((item) => item.assignable));
-      setMatrix(body.matrix);
+      if (!permRes.ok) {
+        setError(permBody.error || "Não foi possível carregar as permissões de API.");
+        return;
+      }
+
+      setMenuCatalog(menuBody.catalog.filter((item) => item.assignable));
+      setMenuMatrix(menuBody.matrix);
+      setPermCatalog(permBody.catalog);
+      setPermMatrix(permBody.matrix);
     } catch {
-      setError("Erro ao carregar permissões de menu.");
+      setError("Erro ao carregar permissões.");
     } finally {
       setLoading(false);
     }
@@ -77,10 +100,8 @@ export default function PermissoesPage() {
     else setLoading(false);
   }, [isSuperAdmin, load]);
 
-  const roles = useMemo(() => [...editableRoleNames], []);
-
-  const toggle = (roleName: string, menuKey: string) => {
-    setMatrix((current) => {
+  const toggleMenu = (roleName: string, menuKey: string) => {
+    setMenuMatrix((current) => {
       const currentKeys = new Set(current[roleName] ?? []);
       if (currentKeys.has(menuKey)) currentKeys.delete(menuKey);
       else currentKeys.add(menuKey);
@@ -89,26 +110,61 @@ export default function PermissoesPage() {
     setMessage("");
   };
 
-  const saveRole = async (roleName: string) => {
-    setSavingRole(roleName);
+  const togglePerm = (roleName: string, permissionKey: string) => {
+    setPermMatrix((current) => {
+      const currentKeys = new Set(current[roleName] ?? []);
+      if (currentKeys.has(permissionKey)) currentKeys.delete(permissionKey);
+      else currentKeys.add(permissionKey);
+      return { ...current, [roleName]: Array.from(currentKeys) };
+    });
+    setMessage("");
+  };
+
+  const saveMenuRole = async (roleName: string) => {
+    setSavingRole(`menu:${roleName}`);
     setError("");
     setMessage("");
     try {
       const res = await fetch(`/api/roles/${roleName}/menu-permissions`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ menuKeys: matrix[roleName] ?? [] }),
+        body: JSON.stringify({ menuKeys: menuMatrix[roleName] ?? [] }),
       });
       const body = await res.json();
       if (!res.ok) {
-        setError(body.error || `Falha ao salvar perfil ${roleName}.`);
+        setError(body.error || `Falha ao salvar menu do perfil ${roleName}.`);
         return;
       }
       setMessage(
-        `Menu do perfil ${roleLabels[roleName] ?? roleName} salvo. Os usuários desse perfil precisam relogar para ver a alteração.`,
+        `Menu do perfil ${roleLabels[roleName] ?? roleName} salvo. Os usuários desse perfil precisam relogar.`,
       );
     } catch {
-      setError(`Erro ao salvar perfil ${roleName}.`);
+      setError(`Erro ao salvar menu do perfil ${roleName}.`);
+    } finally {
+      setSavingRole(null);
+    }
+  };
+
+  const savePermRole = async (roleName: string) => {
+    setSavingRole(`api:${roleName}`);
+    setError("");
+    setMessage("");
+    try {
+      const res = await fetch(`/api/roles/${roleName}/permissions`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ permissionKeys: permMatrix[roleName] ?? [] }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setError(body.error || `Falha ao salvar permissões do perfil ${roleName}.`);
+        return;
+      }
+      setMessage(
+        `Permissões do perfil ${roleLabels[roleName] ?? roleName} salvas. Os usuários desse perfil precisam relogar.`,
+      );
+    } catch {
+      setError(`Erro ao salvar permissões do perfil ${roleName}.`);
     } finally {
       setSavingRole(null);
     }
@@ -118,8 +174,8 @@ export default function PermissoesPage() {
     return (
       <Stack spacing={2}>
         <PageHeader
-          title="Permissões de menu"
-          description="Controle quais itens do menu cada perfil pode visualizar."
+          title="Permissões"
+          description="Controle o menu e as permissões de API de cada perfil."
         />
         <Alert severity="warning">
           Apenas Super Administradores podem acessar esta tela.
@@ -131,12 +187,13 @@ export default function PermissoesPage() {
   return (
     <Stack spacing={3}>
       <PageHeader
-        title="Permissões de menu"
-        description="Selecione quais itens do menu cada perfil pode ver. Empresas e Permissões permanecem exclusivos do Super Admin."
+        title="Permissões"
+        description="Menu controla o que aparece na lateral. Permissões de API controlam o que o perfil pode fazer de fato (upload, usuários, backups, etc.)."
       />
 
       <Alert severity="info">
-        As alterações de menu entram em vigor no próximo login do usuário do perfil.
+        Alterações entram em vigor no próximo login do usuário do perfil. Empresas e a
+        própria tela de Permissões permanecem exclusivos do Super Admin.
       </Alert>
 
       {error && (
@@ -150,11 +207,20 @@ export default function PermissoesPage() {
         </Alert>
       )}
 
+      <Tabs
+        value={tab}
+        onChange={(_, value: TabKey) => setTab(value)}
+        sx={{ borderBottom: 1, borderColor: "divider" }}
+      >
+        <Tab value="menu" label="Itens do menu" />
+        <Tab value="api" label="Permissões de API" />
+      </Tabs>
+
       {loading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
           <CircularProgress />
         </Box>
-      ) : (
+      ) : tab === "menu" ? (
         <Paper variant="outlined" sx={{ overflow: "auto" }}>
           <Table size="small" stickyHeader>
             <TableHead>
@@ -170,10 +236,10 @@ export default function PermissoesPage() {
                         size="small"
                         variant="contained"
                         startIcon={<Save />}
-                        disabled={savingRole === roleName}
-                        onClick={() => void saveRole(roleName)}
+                        disabled={savingRole === `menu:${roleName}`}
+                        onClick={() => void saveMenuRole(roleName)}
                       >
-                        {savingRole === roleName ? "Salvando..." : "Salvar"}
+                        {savingRole === `menu:${roleName}` ? "Salvando..." : "Salvar"}
                       </Button>
                     </Stack>
                   </TableCell>
@@ -181,7 +247,7 @@ export default function PermissoesPage() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {catalog.map((item) => (
+              {menuCatalog.map((item) => (
                 <TableRow key={item.key} hover>
                   <TableCell>
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
@@ -192,12 +258,73 @@ export default function PermissoesPage() {
                     </Typography>
                   </TableCell>
                   {roles.map((roleName) => {
-                    const checked = (matrix[roleName] ?? []).includes(item.key);
+                    const checked = (menuMatrix[roleName] ?? []).includes(item.key);
                     return (
                       <TableCell key={`${roleName}-${item.key}`} align="center">
                         <Checkbox
                           checked={checked}
-                          onChange={() => toggle(roleName, item.key)}
+                          onChange={() => toggleMenu(roleName, item.key)}
+                          slotProps={{
+                            input: {
+                              "aria-label": `${item.label} para ${roleName}`,
+                            },
+                          }}
+                        />
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Paper>
+      ) : (
+        <Paper variant="outlined" sx={{ overflow: "auto" }}>
+          <Table size="small" stickyHeader>
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ fontWeight: 700, minWidth: 220 }}>Permissão</TableCell>
+                {roles.map((roleName) => (
+                  <TableCell key={roleName} align="center" sx={{ fontWeight: 700, minWidth: 140 }}>
+                    <Stack spacing={1} sx={{ alignItems: "center" }}>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        {roleLabels[roleName] ?? roleName}
+                      </Typography>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        startIcon={<Save />}
+                        disabled={savingRole === `api:${roleName}`}
+                        onClick={() => void savePermRole(roleName)}
+                      >
+                        {savingRole === `api:${roleName}` ? "Salvando..." : "Salvar"}
+                      </Button>
+                    </Stack>
+                  </TableCell>
+                ))}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {permCatalog.map((item) => (
+                <TableRow key={item.key} hover>
+                  <TableCell>
+                    <Typography variant="caption" color="text.secondary">
+                      {item.group}
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {item.label}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      {item.key} — {item.description}
+                    </Typography>
+                  </TableCell>
+                  {roles.map((roleName) => {
+                    const checked = (permMatrix[roleName] ?? []).includes(item.key);
+                    return (
+                      <TableCell key={`${roleName}-${item.key}`} align="center">
+                        <Checkbox
+                          checked={checked}
+                          onChange={() => togglePerm(roleName, item.key)}
                           slotProps={{
                             input: {
                               "aria-label": `${item.label} para ${roleName}`,

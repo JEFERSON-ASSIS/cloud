@@ -6,9 +6,17 @@ export async function assertSectorAccess(
   organizationId: string | null | undefined,
   sectorId: string | null | undefined,
   userRole: string | null | undefined,
-  minRole: "VIEWER_ONLY" | "VIEWER_DOWNLOAD" | "EDITOR" | "ADMIN" = "VIEWER_DOWNLOAD"
+  minRole: "VIEWER_ONLY" | "VIEWER_DOWNLOAD" | "EDITOR" | "ADMIN" = "VIEWER_DOWNLOAD",
+  options?: { allowDocumentManage?: boolean; permissions?: string[] },
 ): Promise<void> {
   if (userRole === "SUPER_ADMIN" || userRole === "ADMIN") return;
+  if (
+    options?.allowDocumentManage &&
+    (minRole === "EDITOR" || minRole === "ADMIN") &&
+    options.permissions?.includes("document.manage")
+  ) {
+    return;
+  }
   if (!sectorId) return;
   if (!userId || !organizationId) throw new AuthorizationError("Sessão de usuário inválida.");
 

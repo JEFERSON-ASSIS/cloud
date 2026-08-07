@@ -17,7 +17,7 @@ export async function PATCH(
       organizationId?: string;
     };
     const { tenant, organizationId: requestedOrgId } =
-      await requireTenantOrganization("document.manage", request, body.organizationId);
+      await requireTenantOrganization("document.read", request, body.organizationId);
     const { id } = await context.params;
     const document = await prisma.document.findFirst({
       where:
@@ -32,12 +32,17 @@ export async function PATCH(
       );
 
     const organizationId = document.organizationId;
+    const sectorOpts = {
+      allowDocumentManage: true,
+      permissions: tenant.permissions,
+    };
     await assertSectorAccess(
       tenant.userId,
       organizationId,
       document.sectorId,
       tenant.role,
       "EDITOR",
+      sectorOpts,
     );
 
     const { drive, rootFolderId } = await ensureDriveRoot(
@@ -59,6 +64,7 @@ export async function PATCH(
           target.sectorId,
           tenant.role,
           "EDITOR",
+          sectorOpts,
         );
       }
       const current = document.folderId
@@ -100,6 +106,7 @@ export async function PATCH(
           previous.sectorId,
           tenant.role,
           "EDITOR",
+          sectorOpts,
         );
       }
       await drive.update(document.storageFileId, { trashed: false });
@@ -138,7 +145,7 @@ export async function DELETE(
 ) {
   try {
     const { tenant, organizationId: requestedOrgId } =
-      await requireTenantOrganization("document.manage", request);
+      await requireTenantOrganization("document.read", request);
     const { id } = await context.params;
     const document = await prisma.document.findFirst({
       where:
@@ -163,6 +170,7 @@ export async function DELETE(
       document.sectorId,
       tenant.role,
       "EDITOR",
+      { allowDocumentManage: true, permissions: tenant.permissions },
     );
 
     const { drive } = await driveForOrganization(organizationId);

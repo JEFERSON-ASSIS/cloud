@@ -4,11 +4,12 @@ import { cleanName, assertFolder } from "@/server/documents";
 import { ensureDriveRoot } from "@/server/google-drive";
 import { writeAudit } from "@/server/audit";
 import { assertSectorPermission } from "@i7ai/security";
+import { canManageDocuments } from "@/server/document-access";
 
 export async function POST(request: Request) {
   let remoteId: string | undefined;
   try {
-    const tenant = await requireTenant("document.manage");
+    const tenant = await requireTenant("document.read");
     const body = (await request.json()) as {
       name?: string;
       parentId?: string | null;
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
     }
 
     // Validar permissões da secretaria se fornecida
-    const isOrgAdminOrSuper = tenant.role === "SUPER_ADMIN" || tenant.role === "ADMIN";
+    const canMutate = canManageDocuments(tenant);
     if (sectorId) {
       const membership = await prisma.sectorUser.findUnique({
         where: {
@@ -53,7 +54,7 @@ export async function POST(request: Request) {
           },
         },
       });
-      assertSectorPermission(membership?.role, "EDITOR", isOrgAdminOrSuper);
+      assertSectorPermission(membership?.role, "EDITOR", canMutate);
     }
 
     const organization = await prisma.organization.findUniqueOrThrow({

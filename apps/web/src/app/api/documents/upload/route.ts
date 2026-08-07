@@ -6,12 +6,13 @@ import { assertFolder, cleanName } from "@/server/documents";
 import { ensureDriveRoot, ensureSectorDriveFolder } from "@/server/google-drive";
 import { writeAudit } from "@/server/audit";
 import { assertSectorPermission } from "@i7ai/security";
+import { canManageDocuments } from "@/server/document-access";
 
 export async function POST(request: Request) {
   let remoteFileId: string | undefined;
   let uploadedDrive: Awaited<ReturnType<typeof ensureDriveRoot>>["drive"] | undefined;
   try {
-    const tenant = await requireTenant("document.manage");
+    const tenant = await requireTenant("document.read");
     const data = await request.formData();
     const file = data.get("file");
     const folderId = data.get("folderId")?.toString() || null;
@@ -55,7 +56,7 @@ export async function POST(request: Request) {
     }
 
     // Validar permissões da secretaria se fornecida
-    const isOrgAdminOrSuper = tenant.role === "SUPER_ADMIN" || tenant.role === "ADMIN";
+    const canMutate = canManageDocuments(tenant);
     if (sectorId) {
       const membership = await prisma.sectorUser.findUnique({
         where: {
@@ -65,7 +66,7 @@ export async function POST(request: Request) {
           },
         },
       });
-      assertSectorPermission(membership?.role, "EDITOR", isOrgAdminOrSuper);
+      assertSectorPermission(membership?.role, "EDITOR", canMutate);
 
       // Validar quota da secretaria
       const sector = await prisma.sector.findFirst({

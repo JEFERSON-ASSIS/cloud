@@ -2,6 +2,7 @@ import { prisma } from "@i7ai/database";
 import { requireTenantOrganization } from "@/server/tenant";
 import { folderBreadcrumbs } from "@/server/documents";
 import { assertSectorPermission } from "@i7ai/security";
+import { canManageDocuments } from "@/server/document-access";
 
 export async function GET(request: Request) {
   try {
@@ -18,6 +19,7 @@ export async function GET(request: Request) {
     const storageSpaceId = url.searchParams.get("storageSpaceId");
 
     const isPrivileged = tenant.role === "SUPER_ADMIN" || tenant.role === "ADMIN";
+    const canMutate = canManageDocuments(tenant);
     let isReadOnly = false;
     let canDownload = true;
 
@@ -44,8 +46,13 @@ export async function GET(request: Request) {
       
       if (!isPrivileged) {
         const role = membership?.role;
-        isReadOnly = role !== "EDITOR" && role !== "ADMIN";
-        canDownload = role === "VIEWER_DOWNLOAD" || role === "EDITOR" || role === "ADMIN";
+        isReadOnly =
+          !canMutate && role !== "EDITOR" && role !== "ADMIN";
+        canDownload =
+          canMutate ||
+          role === "VIEWER_DOWNLOAD" ||
+          role === "EDITOR" ||
+          role === "ADMIN";
       }
     }
 

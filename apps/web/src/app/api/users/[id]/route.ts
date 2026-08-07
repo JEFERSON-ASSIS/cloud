@@ -3,6 +3,7 @@ import { prisma } from "@i7ai/database";
 import { z } from "zod";
 import { requireTenant } from "@/server/tenant";
 import { canAssignOrganizationRole, resolveManagedOrganizationId, shouldDeactivateUser } from "@/server/user-memberships";
+import { defaultSectorRoleForOrgRole } from "@/server/document-access";
 
 const updateSchema = z.object({
   name: z.string().trim().min(2).max(120).optional(),
@@ -94,6 +95,13 @@ export async function PATCH(
       updateData.passwordHash = await argon2.hash(data.password, { type: argon2.argon2id });
     }
 
+    const existingOrgRole = await prisma.organizationUser.findFirst({
+      where: { userId: id, organizationId: { in: targetOrganizationIds } },
+      include: { role: { select: { name: true } } },
+    });
+    const orgRoleName = data.role ?? existingOrgRole?.role.name ?? "VIEWER";
+    const sectorRole = defaultSectorRoleForOrgRole(orgRoleName);
+
     const user = await prisma.$transaction(async (tx) => {
       const updated = await tx.user.update({ where: { id }, data: updateData });
       if (data.role) {
@@ -102,6 +110,11 @@ export async function PATCH(
           where: { organizationId_userId: { organizationId, userId: id } },
           update: { roleId: role.id },
           create: { organizationId, userId: id, roleId: role.id },
+        });
+        // Alinha papel na secretaria ao perfil da empresa (ex.: OPERATOR → EDITOR).
+        await tx.sectorUser.updateMany({
+          where: { userId: id, sector: { organizationId: { in: targetOrganizationIds } } },
+          data: { role: sectorRole },
         });
       }
       if (tenant.role === "SUPER_ADMIN" && data.organizationIds) {
@@ -116,8 +129,8 @@ export async function PATCH(
         });
         for (const sector of validSectors) await tx.sectorUser.upsert({
           where: { sectorId_userId: { sectorId: sector.id, userId: id } },
-          update: {},
-          create: { sectorId: sector.id, userId: id, role: "VIEWER_DOWNLOAD" },
+          update: { role: sectorRole },
+          create: { sectorId: sector.id, userId: id, role: sectorRole },
         });
       }
       return updated;

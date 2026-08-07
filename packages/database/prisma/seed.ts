@@ -35,7 +35,7 @@ const rolePermissions: Record<string, string[]> = {
     "backup.read",
     "backup.manage",
   ],
-  VIEWER: ["dashboard.read", "document.read", "backup.read"],
+  VIEWER: ["dashboard.read", "document.read", "document.manage", "backup.read"],
 };
 
 /** Visibilidade inicial do menu por perfil (itens superAdminOnly ficam só para SUPER_ADMIN no AppShell). */

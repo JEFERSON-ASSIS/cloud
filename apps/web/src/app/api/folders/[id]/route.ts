@@ -22,7 +22,7 @@ export async function PATCH(
       organizationId?: string;
     };
     const { tenant, organizationId: requestedOrgId } =
-      await requireTenantOrganization("document.manage", request, body.organizationId);
+      await requireTenantOrganization("document.read", request, body.organizationId);
     const { id } = await context.params;
     const folder = await prisma.folder.findFirst({
       where:
@@ -38,12 +38,17 @@ export async function PATCH(
       // SUPER_ADMIN pode operar pelo id; alinha o contexto à empresa do recurso.
     }
 
+    const sectorOpts = {
+      allowDocumentManage: true,
+      permissions: tenant.permissions,
+    };
     await assertSectorAccess(
       tenant.userId,
       organizationId,
       folder.sectorId,
       tenant.role,
       "EDITOR",
+      sectorOpts,
     );
 
     const { drive } = await ensureDriveRoot(organizationId, "Documentos");
@@ -73,6 +78,7 @@ export async function PATCH(
           nextSectorId,
           tenant.role,
           "EDITOR",
+          sectorOpts,
         );
       }
 
@@ -132,6 +138,7 @@ export async function PATCH(
           previous.sectorId,
           tenant.role,
           "EDITOR",
+          sectorOpts,
         );
       }
       if (folder.storageFolderId) {
