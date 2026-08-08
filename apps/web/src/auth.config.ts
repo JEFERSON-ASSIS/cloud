@@ -1,6 +1,6 @@
 import type { NextAuthConfig } from "next-auth";
 
-/** Rotas públicas (página ou API). Demais exigem sessão. */
+/** Rotas públicas (página, API ou asset estático). Demais exigem sessão. */
 function isPublicPath(pathname: string): boolean {
   if (
     pathname === "/login" ||
@@ -16,6 +16,10 @@ function isPublicPath(pathname: string): boolean {
     return true;
   }
   if (pathname.startsWith("/api/password/")) {
+    return true;
+  }
+  // Logos/favicons da tela de login (sem sessão)
+  if (/\.(?:svg|png|jpg|jpeg|gif|webp|ico)$/i.test(pathname)) {
     return true;
   }
   return false;
