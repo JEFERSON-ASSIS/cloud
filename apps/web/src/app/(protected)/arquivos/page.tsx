@@ -8,14 +8,19 @@ import {
   useState,
 } from "react";
 import {
+  CheckCircle,
+  Close,
+  CloudUpload,
   Delete,
   Download,
+  Error as ErrorIcon,
   Folder,
   GridView,
   InsertDriveFile,
   List,
   MoreVert,
   Restore,
+  Schedule,
   Upload,
 } from "@mui/icons-material";
 import {
@@ -24,6 +29,7 @@ import {
   Breadcrumbs,
   Button,
   Card,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -56,6 +62,24 @@ type Listing = {
   folders: Item[];
   documents: Item[];
 };
+
+type UploadStatus = "pending" | "uploading" | "done" | "error";
+
+type UploadJob = {
+  id: string;
+  name: string;
+  size: number;
+  status: UploadStatus;
+  progress: number;
+  error?: string;
+};
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export default function FilesPage() {
   const { activeOrganizationId, activeSectorId } = useActiveTenant();
   const query = useSearchParams();
@@ -77,14 +101,16 @@ export default function FilesPage() {
     [menu, setMenu] = useState<{ anchor: HTMLElement; item: Item } | null>(
       null,
     ),
-    [progress, setProgress] = useState<number | null>(null),
     [preview, setPreview] = useState<Item | null>(null),
     [moveItem, setMoveItem] = useState<Item | null>(null),
     [moveTarget, setMoveTarget] = useState(""),
     [allFolders, setAllFolders] = useState<Item[]>([]);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [canDownload, setCanDownload] = useState(true);
+  const [uploadQueue, setUploadQueue] = useState<UploadJob[]>([]);
+  const [uploadPanelOpen, setUploadPanelOpen] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const uploadingRef = useRef(false);
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -132,25 +158,62 @@ export default function FilesPage() {
     return () => window.removeEventListener("active-sector-changed", handleSectorChange);
   }, [load]);
 
+  const patchUploadJob = (id: string, patch: Partial<UploadJob>) => {
+    setUploadQueue((current) =>
+      current.map((job) => (job.id === id ? { ...job, ...patch } : job)),
+    );
+  };
+
   const uploadFiles = async (files: FileList | File[]) => {
-    for (const file of Array.from(files)) {
-      setBusy(true);
-      setProgress(0);
+    const selected = Array.from(files);
+    if (!selected.length) return;
+    if (uploadingRef.current) {
+      setError("Aguarde o envio atual terminar para adicionar mais arquivos.");
+      return;
+    }
+
+    const jobs: UploadJob[] = selected.map((file, index) => ({
+      id: `${Date.now()}-${index}-${file.name}`,
+      name: file.name,
+      size: file.size,
+      status: "pending",
+      progress: 0,
+    }));
+
+    setUploadQueue(jobs);
+    setUploadPanelOpen(true);
+    uploadingRef.current = true;
+
+    let hadSuccess = false;
+    for (let i = 0; i < selected.length; i += 1) {
+      const file = selected[i]!;
+      const job = jobs[i]!;
+      patchUploadJob(job.id, { status: "uploading", progress: 0, error: undefined });
+
       const body = new FormData();
       body.set("file", file);
       if (folderId) body.set("folderId", folderId);
       if (activeSectorId) body.set("sectorId", activeSectorId);
       if (activeOrganizationId) body.set("organizationId", activeOrganizationId);
+
       try {
         await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open("POST", "/api/documents/upload");
           xhr.upload.onprogress = (event) => {
-            if (event.lengthComputable)
-              setProgress(Math.round((event.loaded / event.total) * 100));
+            if (event.lengthComputable) {
+              patchUploadJob(job.id, {
+                progress: Math.round((event.loaded / event.total) * 100),
+              });
+            }
           };
           xhr.onload = () => {
-            const result = JSON.parse(xhr.responseText) as { error?: string };
+            let result: { error?: string } = {};
+            try {
+              result = JSON.parse(xhr.responseText || "{}") as { error?: string };
+            } catch {
+              result = {};
+            }
             if (xhr.status >= 200 && xhr.status < 300) resolve();
             else reject(new Error(result.error ?? "Falha no upload."));
           };
@@ -158,18 +221,33 @@ export default function FilesPage() {
             reject(new Error("Erro de conexão durante o upload."));
           xhr.send(body);
         });
+        patchUploadJob(job.id, { status: "done", progress: 100 });
+        hadSuccess = true;
       } catch (uploadError) {
-        setError(
-          uploadError instanceof Error
-            ? uploadError.message
-            : "Falha no upload.",
-        );
-        break;
+        const message =
+          uploadError instanceof Error ? uploadError.message : "Falha no upload.";
+        patchUploadJob(job.id, { status: "error", error: message });
       }
     }
-    setBusy(false);
-    setProgress(null);
-    await load();
+
+    uploadingRef.current = false;
+    if (input.current) input.current.value = "";
+    if (hadSuccess) await load();
+  };
+
+  const clearFinishedUploads = () => {
+    setUploadQueue((current) =>
+      current.filter((job) => job.status === "pending" || job.status === "uploading"),
+    );
+  };
+
+  const uploadStats = {
+    total: uploadQueue.length,
+    done: uploadQueue.filter((job) => job.status === "done").length,
+    error: uploadQueue.filter((job) => job.status === "error").length,
+    active: uploadQueue.some(
+      (job) => job.status === "pending" || job.status === "uploading",
+    ),
   };
 
   const createFolder = async () => {
@@ -255,16 +333,42 @@ export default function FilesPage() {
           </Breadcrumbs>
         </Box>
         {!isReadOnly && (
-          <Stack direction="row">
-            <Button onClick={() => setDialog(true)} startIcon={<Folder />}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexShrink: 0 }}>
+            <Button
+              variant="outlined"
+              size="medium"
+              onClick={() => setDialog(true)}
+              startIcon={<Folder />}
+              sx={{
+                borderRadius: 2,
+                px: 2,
+                textTransform: "none",
+                fontWeight: 600,
+                borderColor: "divider",
+                color: "text.primary",
+                bgcolor: "background.paper",
+                "&:hover": {
+                  borderColor: "primary.main",
+                  bgcolor: "action.hover",
+                },
+              }}
+            >
               Nova pasta
             </Button>
             <Button
               variant="contained"
+              size="medium"
+              disableElevation
               startIcon={<Upload />}
               onClick={() => input.current?.click()}
+              sx={{
+                borderRadius: 2,
+                px: 2.5,
+                textTransform: "none",
+                fontWeight: 600,
+              }}
             >
-              Upload
+              Enviar arquivos
             </Button>
             <input
               hidden
@@ -284,11 +388,152 @@ export default function FilesPage() {
           {error}
         </Alert>
       )}
-      {busy && (
-        <LinearProgress
-          variant={progress === null ? "indeterminate" : "determinate"}
-          value={progress ?? 0}
-        />
+      {busy && <LinearProgress />}
+      {uploadPanel.length > 0 && uploadPanelOpen && (
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 2,
+            borderRadius: 2,
+            borderColor: "divider",
+            bgcolor: "background.paper",
+          }}
+        >
+          <Stack spacing={1.5}>
+            <Stack
+              direction="row"
+              sx={{ justifyContent: "space-between", alignItems: "center", gap: 1 }}
+            >
+              <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                <CloudUpload color="primary" fontSize="small" />
+                <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                  Fila de envio
+                </Typography>
+                <Chip
+                  size="small"
+                  label={`${uploadStats.done}/${uploadStats.total} enviados`}
+                  color={uploadStats.error ? "warning" : "default"}
+                />
+                {uploadStats.error > 0 && (
+                  <Chip size="small" color="error" label={`${uploadStats.error} com erro`} />
+                )}
+              </Stack>
+              <Stack direction="row" spacing={0.5}>
+                {!uploadStats.active && (
+                  <Button size="small" onClick={clearFinishedUploads} sx={{ textTransform: "none" }}>
+                    Limpar
+                  </Button>
+                )}
+                <IconButton
+                  size="small"
+                  aria-label="Fechar fila de envio"
+                  onClick={() => setUploadPanelOpen(false)}
+                  disabled={uploadStats.active}
+                >
+                  <Close fontSize="small" />
+                </IconButton>
+              </Stack>
+            </Stack>
+
+            <Stack spacing={1.25} sx={{ maxHeight: 280, overflowY: "auto" }}>
+              {uploadQueue.map((job) => (
+                <Box
+                  key={job.id}
+                  sx={{
+                    p: 1.25,
+                    borderRadius: 1.5,
+                    border: "1px solid",
+                    borderColor: "divider",
+                    bgcolor: "action.hover",
+                  }}
+                >
+                  <Stack
+                    direction="row"
+                    spacing={1}
+                    sx={{ alignItems: "flex-start", justifyContent: "space-between" }}
+                  >
+                    <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start", minWidth: 0 }}>
+                      {job.status === "done" ? (
+                        <CheckCircle color="success" fontSize="small" sx={{ mt: 0.25 }} />
+                      ) : job.status === "error" ? (
+                        <ErrorIcon color="error" fontSize="small" sx={{ mt: 0.25 }} />
+                      ) : job.status === "uploading" ? (
+                        <CloudUpload color="primary" fontSize="small" sx={{ mt: 0.25 }} />
+                      ) : (
+                        <Schedule color="disabled" fontSize="small" sx={{ mt: 0.25 }} />
+                      )}
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: 600,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                          title={job.name}
+                        >
+                          {job.name}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {formatBytes(job.size)}
+                          {job.status === "pending" && " · Na fila"}
+                          {job.status === "uploading" && ` · Enviando ${job.progress}%`}
+                          {job.status === "done" && " · Enviado"}
+                          {job.status === "error" && ` · ${job.error || "Erro"}`}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      color={
+                        job.status === "done"
+                          ? "success"
+                          : job.status === "error"
+                            ? "error"
+                            : job.status === "uploading"
+                              ? "primary"
+                              : "default"
+                      }
+                      label={
+                        job.status === "done"
+                          ? "Enviado"
+                          : job.status === "error"
+                            ? "Erro"
+                            : job.status === "uploading"
+                              ? "Enviando"
+                              : "Aguardando"
+                      }
+                    />
+                  </Stack>
+                  {(job.status === "uploading" || job.status === "pending") && (
+                    <LinearProgress
+                      sx={{ mt: 1, borderRadius: 1 }}
+                      variant={job.status === "uploading" ? "determinate" : "indeterminate"}
+                      value={job.status === "uploading" ? job.progress : undefined}
+                    />
+                  )}
+                </Box>
+              ))}
+            </Stack>
+          </Stack>
+        </Paper>
+      )}
+      {!uploadPanelOpen && uploadQueue.length > 0 && (
+        <Alert
+          severity={uploadStats.error ? "warning" : "info"}
+          action={
+            <Button color="inherit" size="small" onClick={() => setUploadPanelOpen(true)}>
+              Ver fila
+            </Button>
+          }
+        >
+          {uploadStats.active
+            ? `Enviando arquivos… ${uploadStats.done}/${uploadStats.total}`
+            : `Envio finalizado: ${uploadStats.done} ok` +
+              (uploadStats.error ? `, ${uploadStats.error} com erro` : "")}
+        </Alert>
       )}
       <Stack direction="row" sx={{ gap: 1 }}>
         <TextField
