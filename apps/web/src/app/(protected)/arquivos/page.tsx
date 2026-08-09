@@ -188,7 +188,7 @@ export default function FilesPage() {
     for (let i = 0; i < selected.length; i += 1) {
       const file = selected[i]!;
       const job = jobs[i]!;
-      patchUploadJob(job.id, { status: "uploading", progress: 0, error: undefined });
+      patchUploadJob(job.id, { status: "uploading", progress: 0 });
 
       const body = new FormData();
       body.set("file", file);
@@ -389,7 +389,7 @@ export default function FilesPage() {
         </Alert>
       )}
       {busy && <LinearProgress />}
-      {uploadPanel.length > 0 && uploadPanelOpen && (
+      {uploadQueue.length > 0 && uploadPanelOpen && (
         <Paper
           variant="outlined"
           sx={{
