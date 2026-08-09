@@ -102,9 +102,49 @@ const backupWorker = new Worker(
         });
         if (!connection?.googleDrive) throw new Error("Armazenamento em nuvem não está conectado.");
 
-        const accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
-        const drive = new GoogleDriveStorageProvider(accessToken);
-        
+        const googleDrive = connection.googleDrive;
+        let accessToken = decryptSecret(googleDrive.encryptedAccessToken);
+        const persistRefreshedToken = async () => {
+          if (!googleDrive.encryptedRefreshToken) {
+            throw new Error("Reconecte a conta de armazenamento em nuvem no painel do sistema.");
+          }
+          const clientId = process.env.GOOGLE_CLIENT_ID;
+          const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+          const response = await fetch("https://oauth2.googleapis.com/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              client_id: clientId || "",
+              client_secret: clientSecret || "",
+              refresh_token: decryptSecret(googleDrive.encryptedRefreshToken),
+              grant_type: "refresh_token",
+            }),
+          });
+          if (!response.ok) {
+            throw new Error("Falha ao renovar token de acesso do armazenamento em nuvem.");
+          }
+          const refreshed = (await response.json()) as {
+            access_token: string;
+            expires_in: number;
+          };
+          accessToken = refreshed.access_token;
+          await prisma.googleDriveConnection.update({
+            where: { id: googleDrive.id },
+            data: {
+              encryptedAccessToken: encryptSecret(accessToken),
+              expiresAt: new Date(Date.now() + refreshed.expires_in * 1000),
+            },
+          });
+          return accessToken;
+        };
+        if (
+          !googleDrive.expiresAt ||
+          googleDrive.expiresAt.getTime() < Date.now() + 60_000
+        ) {
+          await persistRefreshedToken();
+        }
+        const drive = new GoogleDriveStorageProvider(accessToken, persistRefreshedToken);
+
         // Baixar stream para arquivo local
         const downloadStream = await drive.download(remoteFileId);
         await pipeline(Readable.fromWeb(downloadStream as never), createWriteStream(localTempFilePath));
@@ -521,18 +561,14 @@ const backupWorker = new Worker(
         throw new Error("Nenhuma conta de armazenamento em nuvem conectada na organização.");
       }
 
-      // Função de refresh do token Google
-      let accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
-      if (
-        connection.googleDrive.expiresAt &&
-        connection.googleDrive.expiresAt.getTime() < Date.now() + 60_000
-      ) {
-        if (!connection.googleDrive.encryptedRefreshToken) {
+      const googleDrive = connection.googleDrive;
+      let accessToken = decryptSecret(googleDrive.encryptedAccessToken);
+
+      const persistRefreshedToken = async () => {
+        if (!googleDrive.encryptedRefreshToken) {
           throw new Error("Reconecte a conta de armazenamento em nuvem no painel do sistema.");
         }
         await log("INFO", "Renovando token de acesso do armazenamento em nuvem...");
-        
-        // Refresh token logic
         const clientId = process.env.GOOGLE_CLIENT_ID;
         const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
         const response = await fetch("https://oauth2.googleapis.com/token", {
@@ -541,26 +577,36 @@ const backupWorker = new Worker(
           body: new URLSearchParams({
             client_id: clientId || "",
             client_secret: clientSecret || "",
-            refresh_token: decryptSecret(connection.googleDrive.encryptedRefreshToken),
+            refresh_token: decryptSecret(googleDrive.encryptedRefreshToken),
             grant_type: "refresh_token",
           }),
         });
         if (!response.ok) {
           throw new Error("Falha ao renovar token de acesso do armazenamento em nuvem.");
         }
-        const refreshed = await response.json();
+        const refreshed = (await response.json()) as {
+          access_token: string;
+          expires_in: number;
+        };
         accessToken = refreshed.access_token;
         await prisma.googleDriveConnection.update({
-          where: { id: connection.googleDrive.id },
+          where: { id: googleDrive.id },
           data: {
             encryptedAccessToken: encryptSecret(accessToken),
             expiresAt: new Date(Date.now() + refreshed.expires_in * 1000),
           },
         });
+        return accessToken;
+      };
+
+      const needsRefresh =
+        !googleDrive.expiresAt ||
+        googleDrive.expiresAt.getTime() < Date.now() + 60_000;
+      if (needsRefresh) {
+        await persistRefreshedToken();
       }
 
-      // Fazer upload real utilizando GoogleDriveStorageProvider
-      const drive = new GoogleDriveStorageProvider(accessToken);
+      const drive = new GoogleDriveStorageProvider(accessToken, persistRefreshedToken);
       const filename = `${source.name.toLowerCase().replace(/\s+/g, "-")}-${new Date().toISOString().split("T")[0]}-${Date.now()}.sql.gz.enc`;
       
       let mainOrgFolderId: string | undefined = connection.googleDrive.rootFolderId || undefined;

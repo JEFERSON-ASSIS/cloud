@@ -63,7 +63,9 @@ async function refreshToken(refreshToken: string) {
     }),
   });
   if (!response.ok)
-    throw new Error("Não foi possível renovar o acesso ao armazenamento em nuvem.");
+    throw new Error(
+      "Não foi possível renovar o acesso ao Google Drive. Desconecte e conecte novamente em Integrações.",
+    );
   return (await response.json()) as {
     access_token: string;
     expires_in: number;
@@ -82,26 +84,42 @@ export async function driveForOrganization(organizationId: string) {
   });
   if (!connection?.googleDrive)
     throw new Error("Conecte o armazenamento em nuvem antes de continuar.");
-  let accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
-  if (
-    connection.googleDrive.expiresAt &&
-    connection.googleDrive.expiresAt.getTime() < Date.now() + 60_000
-  ) {
-    if (!connection.googleDrive.encryptedRefreshToken)
-      throw new Error("Reconecte o armazenamento em nuvem.");
+
+  const googleDrive = connection.googleDrive;
+  let accessToken = decryptSecret(googleDrive.encryptedAccessToken);
+
+  const persistRefreshedToken = async () => {
+    if (!googleDrive.encryptedRefreshToken) {
+      throw new Error(
+        "Reconecte o Google Drive em Integrações (faltou refresh token).",
+      );
+    }
     const refreshed = await refreshToken(
-      decryptSecret(connection.googleDrive.encryptedRefreshToken),
+      decryptSecret(googleDrive.encryptedRefreshToken),
     );
     accessToken = refreshed.access_token;
     await prisma.googleDriveConnection.update({
-      where: { id: connection.googleDrive.id },
+      where: { id: googleDrive.id },
       data: {
         encryptedAccessToken: encryptSecret(accessToken),
         expiresAt: new Date(Date.now() + refreshed.expires_in * 1000),
       },
     });
+    return accessToken;
+  };
+
+  const needsRefresh =
+    !googleDrive.expiresAt ||
+    googleDrive.expiresAt.getTime() < Date.now() + 60_000;
+
+  if (needsRefresh) {
+    await persistRefreshedToken();
   }
-  return { connection, drive: new GoogleDriveStorageProvider(accessToken) };
+
+  return {
+    connection,
+    drive: new GoogleDriveStorageProvider(accessToken, persistRefreshedToken),
+  };
 }
 
 export async function ensureDriveRoot(

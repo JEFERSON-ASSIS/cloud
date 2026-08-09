@@ -38,16 +38,36 @@ type DriveFile = {
 };
 
 export class GoogleDriveStorageProvider implements StorageProvider {
-  constructor(private readonly accessToken: string) {}
+  constructor(
+    private accessToken: string,
+    private readonly onUnauthorized?: () => Promise<string>,
+  ) {}
 
-  private async request<T>(url: string, init?: RequestInit): Promise<T> {
+  private authHeaders(extra?: HeadersInit): HeadersInit {
+    return {
+      Authorization: `Bearer ${this.accessToken}`,
+      ...(extra ?? {}),
+    };
+  }
+
+  private async fetchWithAuth(
+    url: string,
+    init?: RequestInit,
+    retried = false,
+  ): Promise<Response> {
     const response = await fetch(url, {
       ...init,
-      headers: {
-        Authorization: `Bearer ${this.accessToken}`,
-        ...(init?.headers ?? {}),
-      },
+      headers: this.authHeaders(init?.headers),
     });
+    if (response.status === 401 && !retried && this.onUnauthorized) {
+      this.accessToken = await this.onUnauthorized();
+      return this.fetchWithAuth(url, init, true);
+    }
+    return response;
+  }
+
+  private async request<T>(url: string, init?: RequestInit): Promise<T> {
+    const response = await this.fetchWithAuth(url, init);
     if (!response.ok) {
       const body = await response.text();
       throw new StorageProviderError(
@@ -99,9 +119,8 @@ export class GoogleDriveStorageProvider implements StorageProvider {
   }
 
   async download(id: string): Promise<ReadableStream<Uint8Array>> {
-    const response = await fetch(
+    const response = await this.fetchWithAuth(
       `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`,
-      { headers: { Authorization: `Bearer ${this.accessToken}` } },
     );
     if (!response.ok || !response.body)
       throw new StorageProviderError(
@@ -112,12 +131,9 @@ export class GoogleDriveStorageProvider implements StorageProvider {
   }
 
   async delete(id: string): Promise<void> {
-    const response = await fetch(
+    const response = await this.fetchWithAuth(
       `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}`,
-      {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${this.accessToken}` },
-      },
+      { method: "DELETE" },
     );
     if (!response.ok && response.status !== 404)
       throw new StorageProviderError(

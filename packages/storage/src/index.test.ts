@@ -31,4 +31,24 @@ describe("GoogleDriveStorageProvider", () => {
       new GoogleDriveStorageProvider("inválido").testConnection(),
     ).rejects.toThrow("401");
   });
+
+  it("renova o token e tenta de novo após 401", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("expirado", { status: 401 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ user: { emailAddress: "a@b.com" } }), {
+          status: 200,
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const onUnauthorized = vi.fn().mockResolvedValue("novo-token");
+    const provider = new GoogleDriveStorageProvider("velho", onUnauthorized);
+    await expect(provider.testConnection()).resolves.toBe(true);
+    expect(onUnauthorized).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).toMatchObject({
+      Authorization: "Bearer novo-token",
+    });
+  });
 });

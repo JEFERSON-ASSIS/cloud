@@ -28,46 +28,59 @@ export async function getGoogleDriveProvider(targetOrgId?: string) {
     return null;
   }
 
-  let accessToken = decryptSecret(connection.googleDrive.encryptedAccessToken);
+  const googleDrive = connection.googleDrive;
+  let accessToken = decryptSecret(googleDrive.encryptedAccessToken);
 
-  if (
-    connection.googleDrive.expiresAt &&
-    connection.googleDrive.expiresAt.getTime() < Date.now() + 60_000
-  ) {
-    if (connection.googleDrive.encryptedRefreshToken) {
-      try {
-        const clientId = process.env.GOOGLE_CLIENT_ID;
-        const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-        const response = await fetch("https://oauth2.googleapis.com/token", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            client_id: clientId || "",
-            client_secret: clientSecret || "",
-            refresh_token: decryptSecret(connection.googleDrive.encryptedRefreshToken),
-            grant_type: "refresh_token",
-          }),
-        });
+  const persistRefreshedToken = async () => {
+    if (!googleDrive.encryptedRefreshToken) {
+      throw new Error("Reconecte o Google Drive em Integrações.");
+    }
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId || "",
+        client_secret: clientSecret || "",
+        refresh_token: decryptSecret(googleDrive.encryptedRefreshToken),
+        grant_type: "refresh_token",
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(
+        "Não foi possível renovar o Google Drive. Desconecte e conecte novamente.",
+      );
+    }
+    const refreshed = (await response.json()) as {
+      access_token: string;
+      expires_in: number;
+    };
+    accessToken = refreshed.access_token;
+    await prisma.googleDriveConnection.update({
+      where: { id: googleDrive.id },
+      data: {
+        encryptedAccessToken: encryptSecret(accessToken),
+        expiresAt: new Date(Date.now() + refreshed.expires_in * 1000),
+      },
+    });
+    return accessToken;
+  };
 
-        if (response.ok) {
-          const refreshed = await response.json();
-          accessToken = refreshed.access_token;
-          await prisma.googleDriveConnection.update({
-            where: { id: connection.googleDrive.id },
-            data: {
-              encryptedAccessToken: encryptSecret(accessToken),
-              expiresAt: new Date(Date.now() + refreshed.expires_in * 1000),
-            },
-          });
-        }
-      } catch (errRefresh) {
-        console.warn("Falha ao renovar token do Google Drive:", errRefresh);
-      }
+  const needsRefresh =
+    !googleDrive.expiresAt ||
+    googleDrive.expiresAt.getTime() < Date.now() + 60_000;
+
+  if (needsRefresh) {
+    try {
+      await persistRefreshedToken();
+    } catch (errRefresh) {
+      console.warn("Falha ao renovar token do Google Drive:", errRefresh);
     }
   }
 
   return {
-    drive: new GoogleDriveStorageProvider(accessToken),
+    drive: new GoogleDriveStorageProvider(accessToken, persistRefreshedToken),
     connection,
   };
 }
