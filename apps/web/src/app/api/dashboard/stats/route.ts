@@ -1,5 +1,6 @@
 import { prisma } from "@i7ai/database";
 import { requireTenantOrganization } from "@/server/tenant";
+import { assertSectorAccess, getUserSectorIds } from "@/server/sector-access";
 import { subDays } from "date-fns";
 
 export async function GET(request: Request) {
@@ -10,20 +11,52 @@ export async function GET(request: Request) {
     );
 
     const since = subDays(new Date(), 29);
-    const isPrivileged = tenant.role === "SUPER_ADMIN" || tenant.role === "ADMIN";
+    const isSuperAdmin = tenant.role === "SUPER_ADMIN";
+    const requestedSectorId = new URL(request.url).searchParams.get("sectorId");
+    let sectorId: string | null = null;
 
-    const userSectorIds = isPrivileged
-      ? []
-      : (
-          await prisma.sectorUser.findMany({
-            where: { userId: tenant.userId },
-            select: { sectorId: true },
-          })
-        ).map((s) => s.sectorId);
+    if (!isSuperAdmin) {
+      if (requestedSectorId) {
+        await assertSectorAccess(
+          tenant.userId,
+          organizationId,
+          requestedSectorId,
+          tenant.role,
+          "VIEWER_ONLY",
+        );
+        sectorId = requestedSectorId;
+      } else {
+        const allowedSectorIds = await getUserSectorIds(
+          tenant.userId,
+          organizationId,
+          tenant.role,
+        );
+        const firstSector = await prisma.sector.findFirst({
+          where: {
+            organizationId,
+            deletedAt: null,
+            ...(allowedSectorIds === null
+              ? {}
+              : { id: { in: allowedSectorIds } }),
+          },
+          orderBy: { name: "asc" },
+          select: { id: true },
+        });
+        sectorId = firstSector?.id ?? null;
+      }
+    }
 
-    const documentWhere = isPrivileged
-      ? { organizationId, deletedAt: null }
-      : { organizationId, deletedAt: null, sectorId: { in: userSectorIds } };
+    const documentWhere = {
+      organizationId,
+      deletedAt: null,
+      ...(!isSuperAdmin &&
+        (sectorId ? { sectorId } : { id: { in: [] as string[] } })),
+    };
+    const backupWhere = {
+      organizationId,
+      ...(!isSuperAdmin &&
+        (sectorId ? { sectorId } : { id: { in: [] as string[] } })),
+    };
 
     const [
       documents,
@@ -35,29 +68,36 @@ export async function GET(request: Request) {
       recentLogs,
       dailyActivities,
       organization,
+      sector,
     ] = await Promise.all([
       prisma.document.findMany({
         where: documentWhere,
         select: { size: true },
       }),
       prisma.backupFile.aggregate({
-        where: { backupRun: { organizationId } },
+        where: { backupRun: backupWhere },
         _sum: { size: true },
       }),
       prisma.backupRun.count({
-        where: { organizationId, status: "COMPLETED" },
+        where: { ...backupWhere, status: "COMPLETED" },
       }),
       prisma.backupRun.count({
-        where: { organizationId, status: "FAILED" },
+        where: { ...backupWhere, status: "FAILED" },
       }),
       prisma.organizationUser.count({
-        where: { organizationId },
+        where: {
+          organizationId,
+          ...(!isSuperAdmin && { userId: tenant.userId }),
+        },
       }),
       prisma.storageConnection.count({
         where: { organizationId, status: "CONNECTED", deletedAt: null },
       }),
       prisma.auditLog.findMany({
-        where: { organizationId },
+        where: {
+          organizationId,
+          ...(!isSuperAdmin && { userId: tenant.userId }),
+        },
         orderBy: { createdAt: "desc" },
         take: 5,
         include: { user: { select: { name: true } } },
@@ -66,6 +106,7 @@ export async function GET(request: Request) {
         by: ["createdAt"],
         where: {
           organizationId,
+          ...(!isSuperAdmin && { userId: tenant.userId }),
           createdAt: { gte: since },
         },
         _count: true,
@@ -74,13 +115,21 @@ export async function GET(request: Request) {
         where: { id: organizationId },
         select: { storageLimit: true, name: true },
       }),
+      !isSuperAdmin && sectorId
+        ? prisma.sector.findFirst({
+            where: { id: sectorId, organizationId, deletedAt: null },
+            select: { quotaLimit: true },
+          })
+        : Promise.resolve(null),
     ]);
 
     const totalDocSize = documents.reduce((acc, d) => acc + d.size, BigInt(0));
     const totalBackupSize = backupRunAgg._sum.size ?? BigInt(0);
     const totalUsedBytes = totalDocSize + totalBackupSize;
 
-    const storageLimitBytes = organization?.storageLimit ?? BigInt(107374182400); // 100 GB default
+    const storageLimitBytes = isSuperAdmin
+      ? (organization?.storageLimit ?? BigInt(107374182400))
+      : (sector?.quotaLimit ?? BigInt(0));
     const usedPercentage =
       storageLimitBytes > BigInt(0)
         ? (Number(totalUsedBytes) / Number(storageLimitBytes)) * 100
@@ -88,15 +137,17 @@ export async function GET(request: Request) {
 
     return Response.json({
       organizationName: organization?.name ?? "Empresa",
+      isSuperAdmin,
+      sectorId,
       totalDocuments: documents.length,
       usedBytes: totalUsedBytes.toString(),
       usedGB: (Number(totalUsedBytes) / 1073741824).toFixed(2),
       storageLimitGB: (Number(storageLimitBytes) / 1073741824).toFixed(1),
       usedPercentage: usedPercentage.toFixed(1),
-      backupSuccessCount,
-      backupFailedCount,
-      activeUsersCount,
-      activeIntegrationsCount,
+      backupSuccessCount: isSuperAdmin ? backupSuccessCount : null,
+      backupFailedCount: isSuperAdmin ? backupFailedCount : null,
+      activeUsersCount: isSuperAdmin ? activeUsersCount : null,
+      activeIntegrationsCount: isSuperAdmin ? activeIntegrationsCount : null,
       recentLogs: recentLogs.map((log) => ({
         id: log.id,
         action: log.action,
@@ -107,8 +158,13 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     return Response.json(
-      { error: error instanceof Error ? error.message : "Erro ao carregar estatísticas do painel." },
-      { status: 500 }
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao carregar estatísticas do painel.",
+      },
+      { status: 500 },
     );
   }
 }

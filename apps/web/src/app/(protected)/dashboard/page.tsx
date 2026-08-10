@@ -50,15 +50,17 @@ const actionLabels: Record<string, string> = {
 
 type DashboardData = {
   organizationName: string;
+  isSuperAdmin: boolean;
+  sectorId: string | null;
   totalDocuments: number;
   usedBytes: string;
   usedGB: string;
   storageLimitGB: string;
   usedPercentage: string;
-  backupSuccessCount: number;
-  backupFailedCount: number;
-  activeUsersCount: number;
-  activeIntegrationsCount: number;
+  backupSuccessCount: number | null;
+  backupFailedCount: number | null;
+  activeUsersCount: number | null;
+  activeIntegrationsCount: number | null;
   recentLogs: Array<{
     id: string;
     action: string;
@@ -76,8 +78,13 @@ export default function DashboardPage() {
     setLoading(true);
     try {
       const activeOrgId = localStorage.getItem("active-org-id") || "";
-      const url = activeOrgId
-        ? `/api/dashboard/stats?organizationId=${activeOrgId}`
+      const activeSectorId = localStorage.getItem("active-sector-id") || "";
+      const params = new URLSearchParams();
+      if (activeOrgId) params.set("organizationId", activeOrgId);
+      if (activeSectorId) params.set("sectorId", activeSectorId);
+      const query = params.toString();
+      const url = query
+        ? `/api/dashboard/stats?${query}`
         : "/api/dashboard/stats";
 
       const res = await fetch(url);
@@ -96,9 +103,13 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    void loadStats();
+    queueMicrotask(() => void loadStats());
     window.addEventListener("active-org-changed", loadStats);
-    return () => window.removeEventListener("active-org-changed", loadStats);
+    window.addEventListener("active-sector-changed", loadStats);
+    return () => {
+      window.removeEventListener("active-org-changed", loadStats);
+      window.removeEventListener("active-sector-changed", loadStats);
+    };
   }, [loadStats]);
 
   return (
@@ -108,12 +119,20 @@ export default function DashboardPage() {
         description={`Acompanhe a operação de ${data?.organizationName || "sua empresa"}.`}
       />
 
-      {error && <Alert severity="error" onClose={() => setError("")} sx={{ borderRadius: 2 }}>{error}</Alert>}
+      {error && (
+        <Alert
+          severity="error"
+          onClose={() => setError("")}
+          sx={{ borderRadius: 2 }}
+        >
+          {error}
+        </Alert>
+      )}
       {loading && <LinearProgress sx={{ borderRadius: 1 }} />}
 
       {/* Cards de Métricas */}
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+        <Grid size={{ xs: 12, sm: 6, md: data?.isSuperAdmin ? 4 : 6 }}>
           <MetricCard
             label="Total de documentos"
             value={data?.totalDocuments ?? 0}
@@ -121,53 +140,67 @@ export default function DashboardPage() {
             icon={<DescriptionOutlined />}
           />
         </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+        <Grid size={{ xs: 12, sm: 6, md: data?.isSuperAdmin ? 4 : 6 }}>
           <MetricCard
             label="Armazenamento usado"
             value={`${data?.usedGB ?? "0.00"} GB`}
-            caption={`${data?.usedPercentage ?? "0.0"}% da cota contratada`}
+            caption={
+              data?.isSuperAdmin
+                ? `${data.usedPercentage}% da cota contratada`
+                : `Limite da pasta: ${data?.storageLimitGB ?? "0.0"} GB (${data?.usedPercentage ?? "0.0"}% usado)`
+            }
             icon={<CloudOutlined />}
           />
         </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-          <MetricCard
-            label="Backups realizados"
-            value={data?.backupSuccessCount ?? 0}
-            caption="Histórico completo"
-            icon={<BackupOutlined />}
-          />
-        </Grid>
-
-        <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-          <MetricCard
-            label="Backups com erro"
-            value={data?.backupFailedCount ?? 0}
-            caption="Exigem atenção"
-            icon={<ErrorOutlined />}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-          <MetricCard
-            label="Usuários ativos"
-            value={data?.activeUsersCount ?? 0}
-            caption="Com acesso à empresa"
-            icon={<PeopleOutlined />}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-          <MetricCard
-            label="Integrações ativas"
-            value={data?.activeIntegrationsCount ?? 0}
-            caption="Provedores conectados"
-            icon={<HubOutlined />}
-          />
-        </Grid>
+        {data?.isSuperAdmin && (
+          <>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+              <MetricCard
+                label="Backups realizados"
+                value={data.backupSuccessCount ?? 0}
+                caption="Histórico completo"
+                icon={<BackupOutlined />}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+              <MetricCard
+                label="Backups com erro"
+                value={data.backupFailedCount ?? 0}
+                caption="Exigem atenção"
+                icon={<ErrorOutlined />}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+              <MetricCard
+                label="Usuários ativos"
+                value={data.activeUsersCount ?? 0}
+                caption="Com acesso à empresa"
+                icon={<PeopleOutlined />}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+              <MetricCard
+                label="Integrações ativas"
+                value={data.activeIntegrationsCount ?? 0}
+                caption="Provedores conectados"
+                icon={<HubOutlined />}
+              />
+            </Grid>
+          </>
+        )}
       </Grid>
 
       {/* Atividades Recentes */}
       <Grid container spacing={3}>
         <Grid size={{ xs: 12 }}>
-          <Card elevation={0} sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider" }}>
+          <Card
+            elevation={0}
+            sx={{
+              borderRadius: 3,
+              border: "1px solid",
+              borderColor: "divider",
+            }}
+          >
             <CardContent sx={{ p: 3 }}>
               <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>
                 Atividades recentes
@@ -175,7 +208,11 @@ export default function DashboardPage() {
               {!data?.recentLogs || data.recentLogs.length === 0 ? (
                 <EmptyState
                   title="Nenhuma atividade registrada"
-                  description="As ações realizadas nesta empresa aparecerão aqui."
+                  description={
+                    data?.isSuperAdmin
+                      ? "As ações realizadas nesta empresa aparecerão aqui."
+                      : "Suas ações aparecerão aqui."
+                  }
                 />
               ) : (
                 <Stack spacing={1.5}>
@@ -192,7 +229,10 @@ export default function DashboardPage() {
                       }}
                     >
                       <Box>
-                        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                        <Typography
+                          variant="subtitle2"
+                          sx={{ fontWeight: 600 }}
+                        >
                           {actionLabels[item.action] || item.action}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
