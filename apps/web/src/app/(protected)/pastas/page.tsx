@@ -27,6 +27,7 @@ import {
 } from "@mui/material";
 import { PageHeader } from "@/components/PageHeader/PageHeader";
 import { formatCuiabaDate } from "@/lib/date";
+import { buildScopedFoldersUrl } from "@/lib/folders-scope";
 
 type FolderItem = {
   id: string;
@@ -84,9 +85,15 @@ export default function FoldersPage() {
     const loadFolders = () => {
       setLoading(true);
       const activeOrgId = localStorage.getItem("active-org-id") || "";
-      const url = activeOrgId
-        ? `/api/files?allFolders=1&organizationId=${activeOrgId}`
-        : "/api/files?allFolders=1";
+      const activeSectorId = localStorage.getItem("active-sector-id") || "";
+      const url = buildScopedFoldersUrl(activeOrgId, activeSectorId);
+
+      if (!url) {
+        setFolders([]);
+        setError("");
+        setLoading(false);
+        return;
+      }
 
       fetch(url)
         .then(async (response) => {
@@ -102,7 +109,11 @@ export default function FoldersPage() {
 
     loadFolders();
     window.addEventListener("active-org-changed", loadFolders);
-    return () => window.removeEventListener("active-org-changed", loadFolders);
+    window.addEventListener("active-sector-changed", loadFolders);
+    return () => {
+      window.removeEventListener("active-org-changed", loadFolders);
+      window.removeEventListener("active-sector-changed", loadFolders);
+    };
   }, []);
 
   const paths = useMemo(() => {

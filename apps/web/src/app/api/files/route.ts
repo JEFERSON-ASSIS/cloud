@@ -27,6 +27,9 @@ export async function GET(request: Request) {
     const storageSpaceId = url.searchParams.get("storageSpaceId");
     const privileged = tenantIsPrivileged(tenant);
 
+    if (allFolders && !sectorId) {
+      throw new Error("Selecione uma secretaria para listar as pastas.");
+    }
     if (sectorId) await assertActiveSectorAccess(tenant, organizationId, sectorId);
 
     if (shared) {
@@ -217,7 +220,7 @@ export async function GET(request: Request) {
       canShare = membership?.role === "EDITOR" || membership?.role === "ADMIN";
     }
 
-    if (!folderId && !trash && !search) {
+    if (!allFolders && !folderId && !trash && !search) {
       const sectorsForOrg = await prisma.sector.findMany({
         where: { organizationId, deletedAt: null, ...sectorScopeFilter },
         include: { storageSpaces: { where: { deletedAt: null } } },
@@ -250,7 +253,7 @@ export async function GET(request: Request) {
           ...folderSectorFilter,
           ...(storageSpaceId ? { storageSpaceId } : {}),
           ...(allFolders
-            ? { deletedAt: null }
+            ? { deletedAt: null, storageFolderId: { not: null } }
             : trash
               ? { deletedAt: { not: null } }
               : { parentId: folderId, deletedAt: null }),
