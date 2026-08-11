@@ -2,6 +2,7 @@ import type { Permission } from "@i7ai/types";
 
 export const menuKeys = [
   "dashboard",
+  "perfil",
   "secretarias",
   "arquivos",
   "pastas",
@@ -25,11 +26,13 @@ export type NavItemDefinition = {
   href: string;
   permission?: Permission;
   superAdminOnly?: boolean;
+  alwaysVisible?: boolean;
 };
 
 /** Catálogo único do menu (sem ícones — estes ficam no AppShell). */
 export const navItemDefinitions: NavItemDefinition[] = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", permission: "dashboard.read" },
+  { key: "perfil", label: "Meu perfil", href: "/perfil", alwaysVisible: true },
   { key: "secretarias", label: "Secretarias", href: "/secretarias", permission: "organization.read" },
   { key: "arquivos", label: "Arquivos", href: "/arquivos", permission: "document.read" },
   { key: "pastas", label: "Pastas", href: "/pastas", permission: "document.read" },
@@ -54,7 +57,7 @@ export function isMenuKey(value: string): value is MenuKey {
 /** Itens que um perfil comum pode receber (exclui superAdminOnly). */
 export function assignableMenuKeys(): MenuKey[] {
   return navItemDefinitions
-    .filter((item) => !item.superAdminOnly)
+    .filter((item) => !item.superAdminOnly && !item.alwaysVisible)
     .map((item) => item.key);
 }
 

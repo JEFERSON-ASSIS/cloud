@@ -52,6 +52,7 @@ import {
   FolderCopyOutlined,
   Apartment,
   SecurityOutlined,
+  AccountCircleOutlined,
 } from "@mui/icons-material";
 import type { ReactNode } from "react";
 import type { Permission } from "@i7ai/types";
@@ -67,6 +68,7 @@ const collapsedWidth = 76;
 
 const navIcons: Record<MenuKey, ReactNode> = {
   dashboard: <DashboardOutlined key="d" />,
+  perfil: <AccountCircleOutlined key="profile" />,
   secretarias: <Apartment key="sec" />,
   arquivos: <FolderOutlined key="a" />,
   pastas: <FolderCopyOutlined key="p" />,
@@ -124,6 +126,7 @@ export function AppShell({ children }: PropsWithChildren) {
 
   // Filtragem: SUPER_ADMIN vê tudo; demais usam menuKeys (fallback por permission)
   const filteredNavItems = navItems.filter((item) => {
+    if (item.alwaysVisible) return true;
     if (userRole === "SUPER_ADMIN") return true;
     if (item.superAdminOnly) return false;
     return effectiveMenuKeys.includes(item.key);

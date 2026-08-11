@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
-import { assertFolder, cleanName } from "@/server/documents";
-import { ensureDriveRoot, ensureSectorDriveFolder } from "@/server/google-drive";
+import { assertSectorFolderDestination, cleanName } from "@/server/documents";
+import { ensureSectorDriveFolder } from "@/server/google-drive";
 import { writeAudit } from "@/server/audit";
 import { assertSectorPermission } from "@i7ai/security";
 import { canManageDocuments } from "@/server/document-access";
@@ -11,7 +11,7 @@ import { userFacingStorageError } from "@/server/storage-error";
 
 export async function POST(request: Request) {
   let remoteFileId: string | undefined;
-  let uploadedDrive: Awaited<ReturnType<typeof ensureDriveRoot>>["drive"] | undefined;
+  let uploadedDrive: Awaited<ReturnType<typeof ensureSectorDriveFolder>>["drive"] | undefined;
   let actorRole: string | null | undefined;
   try {
     const contentLength = Number(request.headers.get("content-length"));
@@ -39,9 +39,6 @@ export async function POST(request: Request) {
       ? requestedOrganizationId
       : tenant.organizationId;
     if (!organizationId) throw new Error("Selecione uma empresa ou prefeitura.");
-    let sectorId = data.get("sectorId")?.toString() || null;
-    let storageSpaceId = data.get("storageSpaceId")?.toString() || null;
-
     if (!(file instanceof File)) throw new Error("Selecione um arquivo.");
 
     const org = await prisma.organization.findUnique({
@@ -66,44 +63,39 @@ export async function POST(request: Request) {
     }
 
     const name = cleanName(file.name);
-    const parent = await assertFolder(organizationId, folderId);
-
-    if (parent) {
-      sectorId = parent.sectorId;
-      storageSpaceId = parent.storageSpaceId;
-    }
+    const parent = await assertSectorFolderDestination(organizationId, folderId);
+    const sectorId = parent.sectorId;
+    const storageSpaceId = parent.storageSpaceId;
 
     // Validar permissões da secretaria se fornecida
     const canMutate = canManageDocuments(tenant);
-    if (sectorId) {
-      const membership = await prisma.sectorUser.findUnique({
-        where: {
-          sectorId_userId: {
-            sectorId,
-            userId: tenant.userId,
-          },
+    const membership = await prisma.sectorUser.findUnique({
+      where: {
+        sectorId_userId: {
+          sectorId,
+          userId: tenant.userId,
         },
-      });
-      assertSectorPermission(membership?.role, "EDITOR", canMutate);
+      },
+    });
+    assertSectorPermission(membership?.role, "EDITOR", canMutate);
 
-      // Validar quota da secretaria
-      const sector = await prisma.sector.findFirst({
-        where: { id: sectorId, organizationId, deletedAt: null },
+    // Validar quota da secretaria
+    const sector = await prisma.sector.findFirst({
+      where: { id: sectorId, organizationId, deletedAt: null },
+    });
+    if (!sector) throw new Error("A secretaria não pertence à empresa selecionada.");
+    {
+      const docUsage = await prisma.document.aggregate({
+        where: {
+          sectorId,
+          deletedAt: null,
+          status: "AVAILABLE",
+        },
+        _sum: { size: true },
       });
-      if (!sector) throw new Error("A secretaria não pertence à empresa selecionada.");
-      {
-        const docUsage = await prisma.document.aggregate({
-          where: {
-            sectorId,
-            deletedAt: null,
-            status: "AVAILABLE",
-          },
-          _sum: { size: true },
-        });
-        const currentUsage = docUsage._sum.size || BigInt(0);
-        if (currentUsage + BigInt(file.size) > sector.quotaLimit) {
-          throw new Error("Quota de armazenamento da secretaria excedida.");
-        }
+      const currentUsage = docUsage._sum.size || BigInt(0);
+      if (currentUsage + BigInt(file.size) > sector.quotaLimit) {
+        throw new Error("Quota de armazenamento da secretaria excedida.");
       }
     }
 
@@ -113,30 +105,16 @@ export async function POST(request: Request) {
     const bytes = Buffer.from(await file.arrayBuffer());
     const checksum = createHash("sha256").update(bytes).digest("hex");
 
-    let driveConnection: Awaited<ReturnType<typeof ensureDriveRoot>>["connection"];
-    let driveProvider: Awaited<ReturnType<typeof ensureDriveRoot>>["drive"];
-    let targetDriveFolderId: string;
-
-    if (sectorId) {
-      const sectorObj = await prisma.sector.findFirst({ where: { id: sectorId, organizationId } });
-      const sectorDrive = await ensureSectorDriveFolder(
-        organization.id,
-        organization.name,
-        sectorId,
-        sectorObj?.name ?? "Secretaria",
-      );
-      driveConnection = sectorDrive.connection;
-      driveProvider = sectorDrive.drive;
-      targetDriveFolderId = parent?.storageFolderId ?? sectorDrive.sectorFolderId;
-    } else {
-      const orgDrive = await ensureDriveRoot(
-        organization.id,
-        organization.name,
-      );
-      driveConnection = orgDrive.connection;
-      driveProvider = orgDrive.drive;
-      targetDriveFolderId = parent?.storageFolderId ?? orgDrive.rootFolderId;
-    }
+    const sectorObj = await prisma.sector.findFirst({ where: { id: sectorId, organizationId } });
+    const sectorDrive = await ensureSectorDriveFolder(
+      organization.id,
+      organization.name,
+      sectorId,
+      sectorObj?.name ?? "Secretaria",
+    );
+    const driveConnection = sectorDrive.connection;
+    const driveProvider = sectorDrive.drive;
+    const targetDriveFolderId = parent.storageFolderId ?? sectorDrive.sectorFolderId;
 
     const stored = await driveProvider.upload(
       Readable.from(bytes),
@@ -159,7 +137,7 @@ export async function POST(request: Request) {
       }
       return tx.document.create({ data: {
         organizationId: organization.id,
-        folderId: parent?.id ?? null,
+        folderId: parent.id,
         sectorId,
         storageSpaceId,
         uploadedById: tenant.userId,

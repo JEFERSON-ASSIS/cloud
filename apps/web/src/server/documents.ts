@@ -1,4 +1,7 @@
-import { prisma } from "@i7ai/database";
+import { prisma, type Folder } from "@i7ai/database";
+
+const REQUIRED_SECTOR_FOLDER_MESSAGE =
+  "Abra a pasta da secretaria antes de criar pastas ou enviar arquivos.";
 
 export function cleanName(value: string) {
   const name = value
@@ -21,6 +24,23 @@ export async function assertFolder(
   });
   if (!folder) throw new Error("Pasta não encontrada.");
   return folder;
+}
+
+export function requireFolderDestinationId(folderId?: string | null) {
+  if (!folderId) throw new Error(REQUIRED_SECTOR_FOLDER_MESSAGE);
+  return folderId;
+}
+
+export async function assertSectorFolderDestination(
+  organizationId: string,
+  folderId?: string | null,
+): Promise<Folder & { sectorId: string }> {
+  const folder = await assertFolder(
+    organizationId,
+    requireFolderDestinationId(folderId),
+  );
+  if (!folder?.sectorId) throw new Error(REQUIRED_SECTOR_FOLDER_MESSAGE);
+  return folder as Folder & { sectorId: string };
 }
 
 export async function folderBreadcrumbs(

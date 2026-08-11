@@ -50,6 +50,11 @@ enum DocumentUploadStatus {
   EXPIRED
 }
 
+enum DocumentSharePermission {
+  VIEW
+  DOWNLOAD
+}
+
 enum BackupType {
   MYSQL
   POSTGRESQL
@@ -104,6 +109,8 @@ model User {
   folders                Folder[]                @relation("FolderCreator")
   sectors                SectorUser[]
   documentUploadSessions DocumentUploadSession[]
+  sharesCreated          DocumentShare[]         @relation("DocumentShareCreator")
+  sharesReceived         DocumentShare[]         @relation("DocumentShareRecipient")
 
   @@map("users")
 }
@@ -147,6 +154,7 @@ model Organization {
   sectors                Sector[]
   storageSpaces          StorageSpace[]
   documentUploadSessions DocumentUploadSession[]
+  documentShares         DocumentShare[]
 
   @@index([status, deletedAt])
   @@map("organizations")
@@ -265,6 +273,7 @@ model Folder {
   storageSpace           StorageSpace?           @relation(fields: [storageSpaceId], references: [id], onDelete: SetNull)
   documents              Document[]
   documentUploadSessions DocumentUploadSession[]
+  shares                 DocumentShare[]
 
   @@unique([organizationId, parentId, name])
   @@index([organizationId, deletedAt])
@@ -298,10 +307,41 @@ model Document {
   sector              Sector?                @relation(fields: [sectorId], references: [id], onDelete: SetNull)
   storageSpace        StorageSpace?          @relation(fields: [storageSpaceId], references: [id], onDelete: SetNull)
   uploadSession       DocumentUploadSession?
+  shares              DocumentShare[]
 
   @@unique([storageConnectionId, storageFileId])
   @@index([organizationId, folderId, deletedAt])
   @@map("documents")
+}
+
+model DocumentShare {
+  id             String                  @id @default(uuid()) @db.Uuid
+  organizationId String                  @map("organization_id") @db.Uuid
+  resourceKey    String                  @map("resource_key")
+  documentId     String?                 @map("document_id") @db.Uuid
+  folderId       String?                 @map("folder_id") @db.Uuid
+  sourceSectorId String                  @map("source_sector_id") @db.Uuid
+  targetSectorId String                  @map("target_sector_id") @db.Uuid
+  targetUserId   String?                 @map("target_user_id") @db.Uuid
+  audienceKey    String                  @map("audience_key")
+  permission     DocumentSharePermission @default(VIEW)
+  createdById    String                  @map("created_by_id") @db.Uuid
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
+  revokedAt      DateTime?               @map("revoked_at")
+  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  document       Document?               @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  folder         Folder?                 @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  sourceSector   Sector                  @relation("DocumentShareSourceSector", fields: [sourceSectorId], references: [id], onDelete: Cascade)
+  targetSector   Sector                  @relation("DocumentShareTargetSector", fields: [targetSectorId], references: [id], onDelete: Cascade)
+  targetUser     User?                   @relation("DocumentShareRecipient", fields: [targetUserId], references: [id], onDelete: Cascade)
+  createdBy      User                    @relation("DocumentShareCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, resourceKey, targetSectorId, audienceKey])
+  @@index([targetSectorId, targetUserId, revokedAt])
+  @@index([documentId, revokedAt])
+  @@index([folderId, revokedAt])
+  @@map("document_shares")
 }
 
 model DocumentUploadSession {
@@ -529,6 +569,8 @@ model Sector {
   backupRuns             BackupRun[]
   backupFiles            BackupFile[]
   documentUploadSessions DocumentUploadSession[]
+  outgoingDocumentShares DocumentShare[]         @relation("DocumentShareSourceSector")
+  incomingDocumentShares DocumentShare[]         @relation("DocumentShareTargetSector")
 
   @@unique([organizationId, name])
   @@map("sectors")

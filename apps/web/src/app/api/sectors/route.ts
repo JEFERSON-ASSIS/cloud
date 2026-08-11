@@ -22,6 +22,16 @@ export async function GET(request: Request) {
       where: {
         organizationId,
         deletedAt: null,
+        ...(tenant.role === "SUPER_ADMIN" || tenant.role === "ADMIN"
+          ? {}
+          : {
+              users: {
+                some: {
+                  userId: tenant.userId,
+                  role: { not: "NO_ACCESS" },
+                },
+              },
+            }),
       },
       include: {
         storageSpaces: {
@@ -143,7 +153,7 @@ export async function POST(request: Request) {
 
         // 1. Localizar ou criar a pasta mae da Empresa/Prefeitura no Google Drive
         const rootItems = await drive.list("root");
-        let mainOrgFolder = rootItems.find(
+        const mainOrgFolder = rootItems.find(
           (i) => i.name === organization.name && i.mimeType === "application/vnd.google-apps.folder"
         );
         let mainOrgFolderId = mainOrgFolder?.id;
@@ -162,7 +172,7 @@ export async function POST(request: Request) {
 
         // 2. Localizar ou criar a pasta da Secretaria dentro da pasta da Empresa
         const orgItems = await drive.list(mainOrgFolderId);
-        let sectorFolder = orgItems.find(
+        const sectorFolder = orgItems.find(
           (i) => i.name === sector.name && i.mimeType === "application/vnd.google-apps.folder"
         );
         let sectorDriveFolderId = sectorFolder?.id;
@@ -181,7 +191,7 @@ export async function POST(request: Request) {
 
         // 3. Localizar ou criar a subpasta Backups dentro da Secretaria
         const sectorItems = await drive.list(sectorDriveFolderId);
-        let backupsFolder = sectorItems.find(
+        const backupsFolder = sectorItems.find(
           (i) => i.name === "Backups" && i.mimeType === "application/vnd.google-apps.folder"
         );
         if (!backupsFolder) {

@@ -18,17 +18,25 @@ export function DocumentPreview({
   document,
   onClose,
   hideDownload = false,
+  targetSectorId,
 }: {
   document: PreviewDocument | null;
   onClose: () => void;
   hideDownload?: boolean;
+  targetSectorId?: string;
 }) {
   const [loaded, setLoaded] = useState<{ id: string; text: string } | null>(
     null,
   );
   const mime = document?.mimeType ?? "",
     previewableText = mime.startsWith("text/") || mime === "application/json";
-  const url = document ? `/api/documents/${document.id}/content` : "";
+  const targetQuery = targetSectorId
+    ? `?targetSectorId=${encodeURIComponent(targetSectorId)}`
+    : "";
+  const url = document
+    ? `/api/documents/${document.id}/content${targetQuery}`
+    : "";
+  const downloadUrl = `${url}${targetQuery ? "&" : "?"}download=1`;
   useEffect(() => {
     if (!document || !previewableText) return;
     const controller = new AbortController();
@@ -118,7 +126,7 @@ export function DocumentPreview({
       <DialogActions>
         {!hideDownload && (
           <Button
-            href={document ? `${url}?download=1` : "#"}
+            href={document ? downloadUrl : "#"}
             startIcon={<Download />}
           >
             Download
@@ -129,4 +137,3 @@ export function DocumentPreview({
     </Dialog>
   );
 }
-

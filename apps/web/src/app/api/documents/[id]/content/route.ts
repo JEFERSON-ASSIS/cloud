@@ -2,8 +2,8 @@ import { prisma } from "@i7ai/database";
 import { requireTenantOrganization } from "@/server/tenant";
 import { driveForOrganization } from "@/server/google-drive";
 import { writeAudit } from "@/server/audit";
-import { assertSectorAccess } from "@/server/sector-access";
 import { userFacingStorageError } from "@/server/storage-error";
+import { resolveDocumentAccess } from "@/server/document-shares";
 
 export async function GET(
   request: Request,
@@ -33,14 +33,13 @@ export async function GET(
       );
 
     const organizationId = document.organizationId;
-    const download = new URL(request.url).searchParams.get("download") === "1";
-    await assertSectorAccess(
-      tenant.userId,
-      organizationId,
-      document.sectorId,
-      tenant.role,
-      download ? "VIEWER_DOWNLOAD" : "VIEWER_ONLY",
-    );
+    const url = new URL(request.url);
+    const download = url.searchParams.get("download") === "1";
+    const targetSectorId = url.searchParams.get("targetSectorId") ?? undefined;
+    const access = await resolveDocumentAccess(tenant, document, {
+      download,
+      ...(targetSectorId ? { targetSectorId } : {}),
+    });
 
     const { drive } = await driveForOrganization(organizationId);
     const stream = await drive.download(document.storageFileId);
@@ -50,6 +49,16 @@ export async function GET(
       action: download ? "DOCUMENT_DOWNLOAD" : "DOCUMENT_PREVIEW",
       resourceType: "Document",
       resourceId: id,
+      ...(access.shared
+        ? {
+            metadata: {
+              ...(access.shareId ? { shareId: access.shareId } : {}),
+              ...(access.targetSectorId
+                ? { targetSectorId: access.targetSectorId }
+                : {}),
+            },
+          }
+        : {}),
     });
     return new Response(stream, {
       headers: {

@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import {
+  ArrowBack,
   CheckCircle,
   Close,
   CloudUpload,
@@ -21,6 +22,7 @@ import {
   MoreVert,
   Restore,
   Schedule,
+  ShareOutlined,
   Upload,
 } from "@mui/icons-material";
 import {
@@ -47,6 +49,7 @@ import {
 } from "@mui/material";
 import { DocumentPreview } from "@/components/DocumentPreview/DocumentPreview";
 import { useActiveTenant } from "@/components/AppShell/ActiveTenantContext";
+import { resolveFilesBackTarget } from "@/lib/files-navigation";
 import { useSearchParams } from "next/navigation";
 
 type Item = {
@@ -56,11 +59,36 @@ type Item = {
   size?: string;
   mimeType?: string;
   updatedAt: string;
+  shared?: boolean;
+  virtual?: boolean;
+  shareId?: string;
+  shareCount?: number;
+  sourceSectorName?: string;
+  sharedByName?: string;
+  canDownload?: boolean;
 };
 type Listing = {
   breadcrumbs: { id: string; name: string }[];
   folders: Item[];
   documents: Item[];
+  sharedView?: boolean;
+  canShare?: boolean;
+};
+
+type ShareDialogData = {
+  shares: {
+    id: string;
+    permission: "VIEW" | "DOWNLOAD";
+    targetSector: { id: string; name: string };
+    targetUser: { id: string; name: string; email: string } | null;
+    createdBy: { id: string; name: string };
+    createdAt: string;
+  }[];
+  sectors: {
+    id: string;
+    name: string;
+    users: { id: string; name: string; email: string }[];
+  }[];
 };
 
 type UploadStatus = "pending" | "uploading" | "done" | "error";
@@ -180,6 +208,7 @@ export default function FilesPage() {
     [busy, setBusy] = useState(false),
     [search, setSearch] = useState(""),
     [trash, setTrash] = useState(false),
+    [sharedView, setSharedView] = useState(false),
     [grid, setGrid] = useState(true),
     [dialog, setDialog] = useState(false),
     [folderName, setFolderName] = useState(""),
@@ -194,6 +223,13 @@ export default function FilesPage() {
   const [canDownload, setCanDownload] = useState(true);
   const [uploadQueue, setUploadQueue] = useState<UploadJob[]>([]);
   const [uploadPanelOpen, setUploadPanelOpen] = useState(false);
+  const [shareItem, setShareItem] = useState<Item | null>(null);
+  const [shareData, setShareData] = useState<ShareDialogData | null>(null);
+  const [shareSectorId, setShareSectorId] = useState("");
+  const [shareUserId, setShareUserId] = useState("");
+  const [sharePermission, setSharePermission] = useState<"VIEW" | "DOWNLOAD">("VIEW");
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareError, setShareError] = useState("");
   const input = useRef<HTMLInputElement>(null);
   const uploadingRef = useRef(false);
 
@@ -203,6 +239,7 @@ export default function FilesPage() {
     if (folderId) p.set("folderId", folderId);
     if (search) p.set("search", search);
     if (trash) p.set("trash", "1");
+    if (sharedView) p.set("shared", "1");
     const activeOrgId = activeOrganizationId;
     if (activeOrgId) p.set("organizationId", activeOrgId);
     if (activeSectorId) p.set("sectorId", activeSectorId);
@@ -222,7 +259,7 @@ export default function FilesPage() {
     } finally {
       setBusy(false);
     }
-  }, [folderId, search, trash, activeOrganizationId, activeSectorId]);
+  }, [folderId, search, trash, sharedView, activeOrganizationId, activeSectorId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -237,6 +274,8 @@ export default function FilesPage() {
   useEffect(() => {
     const handleSectorChange = () => {
       setFolderId(null);
+      setSharedView(false);
+      setTrash(false);
       void load();
     };
     window.addEventListener("active-sector-changed", handleSectorChange);
@@ -252,6 +291,10 @@ export default function FilesPage() {
   const uploadFiles = async (files: FileList | File[]) => {
     const selected = Array.from(files);
     if (!selected.length) return;
+    if (!folderId || sharedView || trash) {
+      setError("Abra a pasta da secretaria antes de enviar arquivos.");
+      return;
+    }
     if (uploadingRef.current) {
       setError("Aguarde o envio atual terminar para adicionar mais arquivos.");
       return;
@@ -412,6 +455,10 @@ export default function FilesPage() {
   };
 
   const createFolder = async () => {
+    if (!folderId || sharedView || trash) {
+      setError("Abra a pasta da secretaria antes de criar uma pasta.");
+      return;
+    }
     const r = await fetch("/api/folders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -426,10 +473,103 @@ export default function FilesPage() {
     }
   };
 
+  const loadShareData = async (item: Item) => {
+    const params = new URLSearchParams({
+      resourceType: item.kind,
+      resourceId: item.id,
+    });
+    if (activeOrganizationId) params.set("organizationId", activeOrganizationId);
+    const response = await fetch(`/api/document-shares?${params}`);
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Erro ao consultar compartilhamentos.");
+    setShareData(result);
+    return result as ShareDialogData;
+  };
+
+  const openShareDialog = async (item: Item) => {
+    setShareItem(item);
+    setShareData(null);
+    setShareSectorId("");
+    setShareUserId("");
+    setSharePermission("VIEW");
+    setShareError("");
+    setShareBusy(true);
+    setShareError("");
+    try {
+      await loadShareData(item);
+    } catch (shareError) {
+      setShareItem(null);
+      setError(
+        shareError instanceof Error
+          ? shareError.message
+          : "Erro ao consultar compartilhamentos.",
+      );
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const createShare = async () => {
+    if (!shareItem || !shareSectorId) return;
+    setShareBusy(true);
+    try {
+      const response = await fetch("/api/document-shares", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organizationId: activeOrganizationId,
+          resourceType: shareItem.kind,
+          resourceId: shareItem.id,
+          targetSectorId: shareSectorId,
+          targetUserId: shareUserId || null,
+          permission: sharePermission,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Erro ao compartilhar item.");
+      await loadShareData(shareItem);
+      await load();
+      setShareUserId("");
+    } catch (shareError) {
+      setShareError(
+        shareError instanceof Error ? shareError.message : "Erro ao compartilhar item.",
+      );
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const revokeShare = async (shareId: string) => {
+    if (!shareItem) return;
+    setShareBusy(true);
+    setShareError("");
+    try {
+      const params = new URLSearchParams();
+      if (activeOrganizationId) params.set("organizationId", activeOrganizationId);
+      const response = await fetch(`/api/document-shares/${shareId}?${params}`, {
+        method: "DELETE",
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Erro ao revogar compartilhamento.");
+      await loadShareData(shareItem);
+      await load();
+    } catch (shareError) {
+      setShareError(
+        shareError instanceof Error
+          ? shareError.message
+          : "Erro ao revogar compartilhamento.",
+      );
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
   const action = async (item: Item, kind: string) => {
     setMenu(null);
     if (kind === "download") {
-      window.open(`/api/documents/${item.id}/content?download=1`, "_self");
+      const params = new URLSearchParams({ download: "1" });
+      if (item.shared && activeSectorId) params.set("targetSectorId", activeSectorId);
+      window.open(`/api/documents/${item.id}/content?${params}`, "_self");
       return;
     }
     if (kind === "preview") {
@@ -447,6 +587,11 @@ export default function FilesPage() {
       setMoveItem(item);
       return;
     }
+    if (kind === "share") {
+      await openShareDialog(item);
+      return;
+    }
+    if (item.shared || item.virtual) return;
     const payload: { action: string; name?: string } = { action: kind };
     if (kind === "rename") {
       const name = prompt("Novo nome", item.name);
@@ -467,9 +612,19 @@ export default function FilesPage() {
   };
 
   const items = [...data.folders, ...data.documents];
+  const backTarget = resolveFilesBackTarget({
+    folderId,
+    sharedView,
+    trash,
+    breadcrumbs: data.breadcrumbs,
+  });
+  const shareUsers =
+    shareData?.sectors.find((sector) => sector.id === shareSectorId)?.users ?? [];
   const drop = (e: DragEvent) => {
     e.preventDefault();
-    if (!isReadOnly) void uploadFiles(e.dataTransfer.files);
+    if (!isReadOnly && !sharedView && !trash && folderId) {
+      void uploadFiles(e.dataTransfer.files);
+    }
   };
 
   return (
@@ -483,17 +638,35 @@ export default function FilesPage() {
             Arquivos
           </Typography>
           <Breadcrumbs>
-            <Button size="small" onClick={() => setFolderId(null)}>
+            <Button
+              size="small"
+              onClick={() => {
+                setFolderId(null);
+                setSharedView(false);
+                setTrash(false);
+              }}
+            >
               Documentos
             </Button>
             {data.breadcrumbs.map((x) => (
-              <Button size="small" key={x.id} onClick={() => setFolderId(x.id)}>
+              <Button
+                size="small"
+                key={x.id}
+                onClick={() => {
+                  if (x.id === "__shared__") {
+                    setSharedView(true);
+                    setFolderId(null);
+                  } else {
+                    setFolderId(x.id);
+                  }
+                }}
+              >
                 {x.name}
               </Button>
             ))}
           </Breadcrumbs>
         </Box>
-        {!isReadOnly && (
+        {!isReadOnly && !sharedView && !trash && folderId && (
           <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexShrink: 0 }}>
             <Button
               variant="outlined"
@@ -550,6 +723,12 @@ export default function FilesPage() {
         </Alert>
       )}
       {busy && <LinearProgress />}
+      {sharedView && (
+        <Alert severity="info">
+          Estes itens pertencem a outra secretaria. Você pode visualizar e, quando autorizado,
+          baixar; alterações permanecem sob controle da secretaria de origem.
+        </Alert>
+      )}
       {uploadQueue.length > 0 && uploadPanelOpen && (
         <Paper
           variant="outlined"
@@ -702,6 +881,20 @@ export default function FilesPage() {
         </Alert>
       )}
       <Stack direction="row" sx={{ gap: 1 }}>
+        {backTarget && (
+          <Button
+            variant="outlined"
+            startIcon={<ArrowBack />}
+            onClick={() => {
+              setFolderId(backTarget.folderId);
+              setSharedView(backTarget.sharedView);
+              setTrash(backTarget.trash);
+            }}
+            sx={{ flexShrink: 0, textTransform: "none" }}
+          >
+            Voltar
+          </Button>
+        )}
         <TextField
           fullWidth
           size="small"
@@ -709,15 +902,17 @@ export default function FilesPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <Button
-          color={trash ? "warning" : "inherit"}
-          onClick={() => {
-            setTrash(!trash);
-            setFolderId(null);
-          }}
-        >
-          {trash ? "Voltar" : "Lixeira"}
-        </Button>
+        {!trash && !sharedView && (
+          <Button
+            color="inherit"
+            onClick={() => {
+              setTrash(true);
+              setFolderId(null);
+            }}
+          >
+            Lixeira
+          </Button>
+        )}
         <Tooltip title={grid ? "Exibir em lista" : "Exibir em grade"}>
           <IconButton onClick={() => setGrid(!grid)}>
             {grid ? <List /> : <GridView />}
@@ -736,10 +931,20 @@ export default function FilesPage() {
           <Stack sx={{ alignItems: "center", py: 8 }}>
             <Upload color="disabled" sx={{ fontSize: 48 }} />
             <Typography variant="h6">
-              {trash ? "A lixeira está vazia" : "Arraste arquivos para cá"}
+              {trash
+                ? "A lixeira está vazia"
+                : sharedView
+                  ? "Nenhum item foi compartilhado com esta secretaria"
+                  : folderId
+                    ? "Arraste arquivos para cá"
+                    : "Nenhuma pasta de secretaria disponível"}
             </Typography>
             <Typography color="text.secondary">
-              Ou use os botões acima para começar.
+              {sharedView
+                ? "Quando outra secretaria compartilhar uma pasta ou arquivo, ele aparecerá aqui."
+                : folderId
+                  ? "Ou use os botões acima para começar."
+                  : "Selecione a pasta da secretaria para criar pastas e enviar arquivos."}
             </Typography>
           </Stack>
         ) : (
@@ -763,11 +968,16 @@ export default function FilesPage() {
                     borderRadius: 1,
                     "&:hover": { bgcolor: "action.hover" },
                   }}
-                  onDoubleClick={() =>
-                    item.kind === "folder"
-                      ? setFolderId(item.id)
-                      : void action(item, "preview")
-                  }
+                  onDoubleClick={() => {
+                    if (item.virtual) {
+                      setSharedView(true);
+                      setFolderId(null);
+                    } else if (item.kind === "folder") {
+                      setFolderId(item.id);
+                    } else {
+                      void action(item, "preview");
+                    }
+                  }}
                 >
                   {item.kind === "folder" ? (
                     <Folder color="primary" sx={{ mr: 2 }} />
@@ -783,16 +993,37 @@ export default function FilesPage() {
                         ? "Pasta"
                         : `${(Number(item.size) / 1024).toFixed(1)} KB`}
                     </Typography>
+                    {item.shared && item.sourceSectorName && (
+                      <Typography
+                        variant="caption"
+                        color="primary"
+                        sx={{ display: "block" }}
+                        noWrap
+                      >
+                        Compartilhado por {item.sourceSectorName}
+                      </Typography>
+                    )}
+                    {!item.shared && Boolean(item.shareCount) && (
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        color="primary"
+                        label={`Compartilhado com ${item.shareCount}`}
+                        sx={{ mt: 0.5, height: 22 }}
+                      />
+                    )}
                   </Box>
-                  <IconButton
-                    size="small"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setMenu({ anchor: e.currentTarget, item });
-                    }}
-                  >
-                    <MoreVert />
-                  </IconButton>
+                  {!item.virtual && (
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMenu({ anchor: e.currentTarget, item });
+                      }}
+                    >
+                      <MoreVert />
+                    </IconButton>
+                  )}
                 </Box>
               </Card>
             ))}
@@ -805,22 +1036,28 @@ export default function FilesPage() {
             Visualizar
           </MenuItem>
         )}
-        {!isReadOnly && !trash && menu?.item.kind === "document" && (
+        {!trash && menu?.item.kind === "document" &&
+          (menu.item.shared ? menu.item.canDownload : canDownload) && (
           <MenuItem onClick={() => void action(menu.item, "download")}>
             <Download fontSize="small" /> Baixar
           </MenuItem>
         )}
-        {!isReadOnly && !trash && (
+        {!isReadOnly && data.canShare && !trash && !menu?.item.shared && (
+          <MenuItem onClick={() => menu && void action(menu.item, "share")}>
+            <ShareOutlined fontSize="small" /> Compartilhar
+          </MenuItem>
+        )}
+        {!isReadOnly && !trash && !menu?.item.shared && (
           <MenuItem onClick={() => menu && void action(menu.item, "rename")}>
             Renomear
           </MenuItem>
         )}
-        {!isReadOnly && !trash && (
+        {!isReadOnly && !trash && !menu?.item.shared && (
           <MenuItem onClick={() => menu && void action(menu.item, "move")}>
             Mover
           </MenuItem>
         )}
-        {!isReadOnly && (
+        {!isReadOnly && !menu?.item.shared && (
           <MenuItem
             onClick={() =>
               menu && void action(menu.item, trash ? "restore" : "trash")
@@ -831,6 +1068,150 @@ export default function FilesPage() {
           </MenuItem>
         )}
       </Menu>
+      <Dialog
+        open={!!shareItem}
+        onClose={() => !shareBusy && setShareItem(null)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Compartilhar {shareItem?.name}</DialogTitle>
+        <DialogContent dividers>
+          {!shareData ? (
+            <LinearProgress />
+          ) : (
+            <Stack spacing={2.5}>
+              {shareError && (
+                <Alert severity="error" onClose={() => setShareError("")}>
+                  {shareError}
+                </Alert>
+              )}
+              <Alert severity="info">
+                O destinatário receberá acesso por “Compartilhados comigo”.
+              </Alert>
+              <Box>
+                <Typography variant="subtitle2" sx={{ mb: 0.75 }}>
+                  Secretaria de destino
+                </Typography>
+                <Select
+                  native
+                  fullWidth
+                  value={shareSectorId}
+                  onChange={(event) => {
+                    setShareSectorId(String(event.target.value));
+                    setShareUserId("");
+                  }}
+                >
+                  <option value="">Selecione uma secretaria</option>
+                  {shareData.sectors.map((sector) => (
+                    <option key={sector.id} value={sector.id}>
+                      {sector.name}
+                    </option>
+                  ))}
+                </Select>
+              </Box>
+              <Box>
+                <Typography variant="subtitle2" sx={{ mb: 0.75 }}>
+                  Destinatário
+                </Typography>
+                <Select
+                  native
+                  fullWidth
+                  value={shareUserId}
+                  disabled={!shareSectorId}
+                  onChange={(event) => setShareUserId(String(event.target.value))}
+                >
+                  <option value="">Toda a secretaria</option>
+                  {shareUsers.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name} — {user.email}
+                    </option>
+                  ))}
+                </Select>
+              </Box>
+              <Box>
+                <Typography variant="subtitle2" sx={{ mb: 0.75 }}>
+                  Permissão
+                </Typography>
+                <Select
+                  native
+                  fullWidth
+                  value={sharePermission}
+                  onChange={(event) =>
+                    setSharePermission(String(event.target.value) as "VIEW" | "DOWNLOAD")
+                  }
+                >
+                  <option value="VIEW">Somente visualizar</option>
+                  <option value="DOWNLOAD">Visualizar e baixar</option>
+                </Select>
+              </Box>
+              <Button
+                variant="contained"
+                startIcon={<ShareOutlined />}
+                disabled={!shareSectorId || shareBusy}
+                onClick={() => void createShare()}
+              >
+                Compartilhar acesso
+              </Button>
+
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
+                  Compartilhado com
+                </Typography>
+                {shareData.shares.length === 0 ? (
+                  <Typography color="text.secondary">
+                    Este item ainda não foi compartilhado.
+                  </Typography>
+                ) : (
+                  <Stack spacing={1}>
+                    {shareData.shares.map((share) => (
+                      <Paper key={share.id} variant="outlined" sx={{ p: 1.5 }}>
+                        <Stack
+                          direction={{ xs: "column", sm: "row" }}
+                          spacing={1}
+                          sx={{ justifyContent: "space-between", alignItems: { sm: "center" } }}
+                        >
+                          <Box>
+                            <Typography sx={{ fontWeight: 600 }}>
+                              {share.targetSector.name}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              {share.targetUser
+                                ? `${share.targetUser.name} — ${share.targetUser.email}`
+                                : "Toda a secretaria"}
+                            </Typography>
+                            <Chip
+                              size="small"
+                              sx={{ mt: 0.75 }}
+                              label={
+                                share.permission === "DOWNLOAD"
+                                  ? "Visualizar e baixar"
+                                  : "Somente visualizar"
+                              }
+                            />
+                          </Box>
+                          <Button
+                            color="error"
+                            size="small"
+                            disabled={shareBusy}
+                            onClick={() => void revokeShare(share.id)}
+                          >
+                            Revogar
+                          </Button>
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </Stack>
+                )}
+              </Box>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={shareBusy} onClick={() => setShareItem(null)}>
+            Fechar
+          </Button>
+        </DialogActions>
+      </Dialog>
       <Dialog
         open={dialog}
         onClose={() => setDialog(false)}
@@ -912,7 +1293,14 @@ export default function FilesPage() {
           </Button>
         </DialogActions>
       </Dialog>
-      <DocumentPreview document={preview} onClose={() => setPreview(null)} hideDownload={!canDownload} />
+      <DocumentPreview
+        document={preview}
+        onClose={() => setPreview(null)}
+        hideDownload={preview?.shared ? !preview.canDownload : !canDownload}
+        {...(preview?.shared && activeSectorId
+          ? { targetSectorId: activeSectorId }
+          : {})}
+      />
     </Stack>
   );
 }

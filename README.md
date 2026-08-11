@@ -60,6 +60,8 @@ O módulo de arquivos oferece upload múltiplo com progresso, pastas, movimenta�
 
 Arquivos grandes usam upload resumível em blocos, com reserva de quota, retomada e validação de integridade. Veja [uploads grandes](docs/uploads-grandes.md).
 
+O perfil do usuário e o compartilhamento seguro entre secretarias estão documentados em [perfil e compartilhamentos](docs/perfil-e-compartilhamentos.md).
+
 ## Testes e troubleshooting
 
 Execute `npm test`. Se a saúde retornar `503`, confirme `DATABASE_URL`, o container PostgreSQL e as migrations. Se o login falhar, execute o seed e confirme que usuário, organização e vínculo estão ativos. Não use o segredo placeholder do build em execução real.

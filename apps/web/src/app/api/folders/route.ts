@@ -1,7 +1,7 @@
 import { prisma } from "@i7ai/database";
 import { requireTenant } from "@/server/tenant";
-import { cleanName, assertFolder } from "@/server/documents";
-import { ensureDriveRoot } from "@/server/google-drive";
+import { assertSectorFolderDestination, cleanName } from "@/server/documents";
+import { ensureSectorDriveFolder } from "@/server/google-drive";
 import { writeAudit } from "@/server/audit";
 import { assertSectorPermission } from "@i7ai/security";
 import { canManageDocuments } from "@/server/document-access";
@@ -16,8 +16,6 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       name?: string;
       parentId?: string | null;
-      sectorId?: string | null;
-      storageSpaceId?: string | null;
       organizationId?: string;
     };
     const name = cleanName(body.name ?? "");
@@ -25,20 +23,18 @@ export async function POST(request: Request) {
       ? body.organizationId
       : tenant.organizationId;
     if (!organizationId) throw new Error("Selecione uma empresa ou prefeitura.");
-    const parent = await assertFolder(organizationId, body.parentId);
+    const parent = await assertSectorFolderDestination(
+      organizationId,
+      body.parentId,
+    );
+    const sectorId = parent.sectorId;
+    const storageSpaceId = parent.storageSpaceId;
 
-    let sectorId = body.sectorId || null;
-    let storageSpaceId = body.storageSpaceId || null;
-
-    if (parent) {
-      sectorId = parent.sectorId;
-      storageSpaceId = parent.storageSpaceId;
-    }
-
-    if (sectorId) {
-      const sector = await prisma.sector.findFirst({ where: { id: sectorId, organizationId, deletedAt: null } });
-      if (!sector) throw new Error("A secretaria não pertence à empresa selecionada.");
-    }
+    const sector = await prisma.sector.findFirst({
+      where: { id: sectorId, organizationId, deletedAt: null },
+      select: { name: true },
+    });
+    if (!sector) throw new Error("A secretaria não pertence à empresa selecionada.");
     if (storageSpaceId) {
       const storageSpace = await prisma.storageSpace.findFirst({
         where: { id: storageSpaceId, organizationId, ...(sectorId ? { sectorId } : {}), deletedAt: null },
@@ -48,33 +44,33 @@ export async function POST(request: Request) {
 
     // Validar permissões da secretaria se fornecida
     const canMutate = canManageDocuments(tenant);
-    if (sectorId) {
-      const membership = await prisma.sectorUser.findUnique({
-        where: {
-          sectorId_userId: {
-            sectorId,
-            userId: tenant.userId,
-          },
+    const membership = await prisma.sectorUser.findUnique({
+      where: {
+        sectorId_userId: {
+          sectorId,
+          userId: tenant.userId,
         },
-      });
-      assertSectorPermission(membership?.role, "EDITOR", canMutate);
-    }
+      },
+    });
+    assertSectorPermission(membership?.role, "EDITOR", canMutate);
 
     const organization = await prisma.organization.findUniqueOrThrow({
       where: { id: organizationId },
     });
-    const { drive, rootFolderId } = await ensureDriveRoot(
+    const { drive, sectorFolderId } = await ensureSectorDriveFolder(
       organization.id,
       organization.name,
+      sectorId,
+      sector.name,
     );
     remoteId = await drive.createFolder(
       name,
-      parent?.storageFolderId ?? rootFolderId,
+      parent.storageFolderId ?? sectorFolderId,
     );
     const folder = await prisma.folder.create({
       data: {
         organizationId: organization.id,
-        parentId: parent?.id ?? null,
+        parentId: parent.id,
         sectorId,
         storageSpaceId,
         name,

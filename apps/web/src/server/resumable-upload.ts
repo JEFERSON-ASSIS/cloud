@@ -3,10 +3,9 @@ import { prisma, type DocumentUploadSession, type Prisma } from "@i7ai/database"
 import { assertSectorPermission } from "@i7ai/security";
 import type { TenantSession } from "@i7ai/types";
 import { canManageDocuments } from "@/server/document-access";
-import { assertFolder, cleanName } from "@/server/documents";
+import { assertSectorFolderDestination, cleanName } from "@/server/documents";
 import {
   driveForOrganization,
-  ensureDriveRoot,
   ensureSectorDriveFolder,
 } from "@/server/google-drive";
 import { decryptSecret, encryptSecret } from "@/server/encryption";
@@ -140,77 +139,32 @@ export async function startResumableUpload(
   }
 
   const name = cleanName(input.name);
-  const parent = await assertFolder(input.organizationId, input.folderId);
-  let sectorId = parent?.sectorId ?? input.sectorId ?? null;
-  let storageSpaceId = parent?.storageSpaceId ?? input.storageSpaceId ?? null;
-
-  if (sectorId) {
-    const membership = await prisma.sectorUser.findUnique({
-      where: { sectorId_userId: { sectorId, userId: tenant.userId } },
-    });
-    assertSectorPermission(
-      membership?.role,
-      "EDITOR",
-      canManageDocuments(tenant),
-    );
-    const sector = await prisma.sector.findFirst({
-      where: { id: sectorId, organizationId: input.organizationId, deletedAt: null },
-      select: { name: true },
-    });
-    if (!sector) throw new Error("A secretaria não pertence à empresa selecionada.");
-    const target = await ensureSectorDriveFolder(
-      input.organizationId,
-      organization.name,
-      sectorId,
-      sector.name,
-    );
-    const targetFolderId = parent?.storageFolderId ?? target.sectorFolderId;
-    const uri = await target.drive.startResumableUpload(
-      name,
-      input.size,
-      targetFolderId,
-      input.mimeType || "application/octet-stream",
-    );
-    const session = await prisma.$transaction(
-      async (tx) => {
-        await assertAvailableQuota(tx, {
-          organizationId: input.organizationId,
-          sectorId,
-          size: BigInt(input.size),
-        });
-        return tx.documentUploadSession.create({
-          data: {
-            organizationId: input.organizationId,
-            userId: tenant.userId,
-            folderId: parent?.id ?? null,
-            sectorId,
-            storageSpaceId,
-            storageConnectionId: target.connection.id,
-            name,
-            originalName: input.name,
-            mimeType: input.mimeType || "application/octet-stream",
-            size: BigInt(input.size),
-            encryptedResumableUri: encryptSecret(uri),
-            expiresAt: new Date(Date.now() + SESSION_TTL_MS),
-          },
-        });
-      },
-      { isolationLevel: "Serializable" },
-    );
-    uploadLog("started", {
-      uploadId: session.id,
-      organizationId: session.organizationId,
-      userId: session.userId,
-      size: input.size,
-      sectorId,
-    });
-    return session;
-  }
-
-  sectorId = null;
-  storageSpaceId = null;
-  const target = await ensureDriveRoot(input.organizationId, organization.name);
-  const targetFolderId = parent?.storageFolderId ?? target.rootFolderId;
+  const parent = await assertSectorFolderDestination(
+    input.organizationId,
+    input.folderId,
+  );
+  const sectorId = parent.sectorId;
+  const storageSpaceId = parent.storageSpaceId;
+  const membership = await prisma.sectorUser.findUnique({
+    where: { sectorId_userId: { sectorId, userId: tenant.userId } },
+  });
+  assertSectorPermission(
+    membership?.role,
+    "EDITOR",
+    canManageDocuments(tenant),
+  );
+  const sector = await prisma.sector.findFirst({
+    where: { id: sectorId, organizationId: input.organizationId, deletedAt: null },
+    select: { name: true },
+  });
+  if (!sector) throw new Error("A secretaria não pertence à empresa selecionada.");
+  const target = await ensureSectorDriveFolder(
+    input.organizationId,
+    organization.name,
+    sectorId,
+    sector.name,
+  );
+  const targetFolderId = parent.storageFolderId ?? target.sectorFolderId;
   const uri = await target.drive.startResumableUpload(
     name,
     input.size,
@@ -228,7 +182,7 @@ export async function startResumableUpload(
         data: {
           organizationId: input.organizationId,
           userId: tenant.userId,
-          folderId: parent?.id ?? null,
+          folderId: parent.id,
           sectorId,
           storageSpaceId,
           storageConnectionId: target.connection.id,
@@ -248,7 +202,7 @@ export async function startResumableUpload(
     organizationId: session.organizationId,
     userId: session.userId,
     size: input.size,
-    sectorId: null,
+    sectorId,
   });
   return session;
 }
