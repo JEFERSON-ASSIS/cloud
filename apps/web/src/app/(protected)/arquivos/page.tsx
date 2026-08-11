@@ -75,6 +75,12 @@ type Listing = {
   canShare?: boolean;
 };
 
+const EMPTY_LISTING: Listing = {
+  breadcrumbs: [],
+  folders: [],
+  documents: [],
+};
+
 type ShareDialogData = {
   shares: {
     id: string;
@@ -199,11 +205,8 @@ export default function FilesPage() {
   const [folderId, setFolderId] = useState<string | null>(
       query.get("folderId"),
     ),
-    [data, setData] = useState<Listing>({
-      breadcrumbs: [],
-      folders: [],
-      documents: [],
-    }),
+    [loadedData, setLoadedData] = useState<Listing>(EMPTY_LISTING),
+    [loadedSectorId, setLoadedSectorId] = useState<string | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [search, setSearch] = useState(""),
@@ -232,8 +235,20 @@ export default function FilesPage() {
   const [shareError, setShareError] = useState("");
   const input = useRef<HTMLInputElement>(null);
   const uploadingRef = useRef(false);
+  const loadRequestRef = useRef(0);
+
+  const data = loadedSectorId === activeSectorId ? loadedData : EMPTY_LISTING;
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
+    if (!activeSectorId) {
+      setLoadedData(EMPTY_LISTING);
+      setLoadedSectorId(null);
+      setError("");
+      setBusy(false);
+      return;
+    }
+
     setBusy(true);
     const p = new URLSearchParams();
     if (folderId) p.set("folderId", folderId);
@@ -247,40 +262,53 @@ export default function FilesPage() {
     try {
       const r = await fetch(`/api/files?${p}`);
       const b = await r.json();
+      if (requestId !== loadRequestRef.current) return;
       if (r.ok) {
-        setData(b);
+        setLoadedData(b);
+        setLoadedSectorId(activeSectorId);
+        setError("");
         setIsReadOnly(b.isReadOnly ?? false);
         setCanDownload(b.canDownload ?? !(b.isReadOnly ?? false));
       } else {
+        setLoadedData(EMPTY_LISTING);
+        setLoadedSectorId(null);
         setError(b.error);
       }
     } catch {
-      setError("Erro ao carregar arquivos.");
+      if (requestId === loadRequestRef.current) {
+        setLoadedData(EMPTY_LISTING);
+        setLoadedSectorId(null);
+        setError("Erro ao carregar arquivos.");
+      }
     } finally {
-      setBusy(false);
+      if (requestId === loadRequestRef.current) setBusy(false);
     }
   }, [folderId, search, trash, sharedView, activeOrganizationId, activeSectorId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
-    const handleOrgChange = () => void load();
-    window.addEventListener("active-org-changed", handleOrgChange);
     return () => {
       window.clearTimeout(timer);
-      window.removeEventListener("active-org-changed", handleOrgChange);
+      loadRequestRef.current += 1;
     };
   }, [load]);
 
   useEffect(() => {
-    const handleSectorChange = () => {
+    const handleTenantChange = () => {
+      loadRequestRef.current += 1;
+      setLoadedData(EMPTY_LISTING);
+      setLoadedSectorId(null);
       setFolderId(null);
       setSharedView(false);
       setTrash(false);
-      void load();
     };
-    window.addEventListener("active-sector-changed", handleSectorChange);
-    return () => window.removeEventListener("active-sector-changed", handleSectorChange);
-  }, [load]);
+    window.addEventListener("active-org-changed", handleTenantChange);
+    window.addEventListener("active-sector-changed", handleTenantChange);
+    return () => {
+      window.removeEventListener("active-org-changed", handleTenantChange);
+      window.removeEventListener("active-sector-changed", handleTenantChange);
+    };
+  }, []);
 
   const patchUploadJob = (id: string, patch: Partial<UploadJob>) => {
     setUploadQueue((current) =>

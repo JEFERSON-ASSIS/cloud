@@ -27,13 +27,10 @@ export async function GET(request: Request) {
     const storageSpaceId = url.searchParams.get("storageSpaceId");
     const privileged = tenantIsPrivileged(tenant);
 
-    if (allFolders && !sectorId) {
-      throw new Error("Selecione uma secretaria para listar as pastas.");
-    }
-    if (sectorId) await assertActiveSectorAccess(tenant, organizationId, sectorId);
+    if (!sectorId) throw new Error("Selecione uma secretaria para listar os arquivos.");
+    await assertActiveSectorAccess(tenant, organizationId, sectorId);
 
     if (shared) {
-      if (!sectorId) throw new Error("Selecione uma secretaria para ver os compartilhamentos.");
       if (trash) throw new Error("A lixeira não está disponível em compartilhamentos.");
       const recipient = shareRecipientFilter(tenant.userId, privileged);
 
@@ -161,33 +158,9 @@ export async function GET(request: Request) {
       });
     }
 
-    let userSectorIds: string[] = [];
-    if (!privileged) {
-      const userSectors = await prisma.sectorUser.findMany({
-        where: {
-          userId: tenant.userId,
-          sector: { organizationId, deletedAt: null },
-          role: { not: "NO_ACCESS" },
-        },
-        select: { sectorId: true },
-      });
-      userSectorIds = userSectors.map((membership) => membership.sectorId);
-    }
-    const folderSectorFilter: Prisma.FolderWhereInput = sectorId
-      ? { sectorId }
-      : !privileged
-        ? { sectorId: { in: userSectorIds } }
-        : {};
-    const documentSectorFilter: Prisma.DocumentWhereInput = sectorId
-      ? { sectorId }
-      : !privileged
-        ? { sectorId: { in: userSectorIds } }
-        : {};
-    const sectorScopeFilter: Prisma.SectorWhereInput = sectorId
-      ? { id: sectorId }
-      : !privileged
-        ? { id: { in: userSectorIds } }
-        : {};
+    const folderSectorFilter: Prisma.FolderWhereInput = { sectorId };
+    const documentSectorFilter: Prisma.DocumentWhereInput = { sectorId };
+    const sectorScopeFilter: Prisma.SectorWhereInput = { id: sectorId };
 
     if (folderId && !trash) {
       const selectedFolder = await prisma.folder.findFirst({
@@ -205,7 +178,7 @@ export async function GET(request: Request) {
     let isReadOnly = false;
     let canDownload = true;
     let canShare = privileged;
-    if (sectorId && !privileged) {
+    if (!privileged) {
       const membership = await prisma.sectorUser.findUnique({
         where: { sectorId_userId: { sectorId, userId: tenant.userId } },
       });
