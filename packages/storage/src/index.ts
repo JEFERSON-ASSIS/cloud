@@ -37,6 +37,18 @@ type DriveFile = {
   md5Checksum?: string;
 };
 
+export type ResumableUploadProgress = {
+  complete: boolean;
+  uploadedBytes: number;
+  object?: StoredObject;
+};
+
+export function parseGoogleUploadedBytes(range: string | null): number {
+  if (!range) return 0;
+  const match = /^bytes=0-(\d+)$/.exec(range.trim());
+  return match ? Number(match[1]) + 1 : 0;
+}
+
 export class GoogleDriveStorageProvider implements StorageProvider {
   constructor(
     private accessToken: string,
@@ -116,6 +128,116 @@ export class GoogleDriveStorageProvider implements StorageProvider {
       },
     );
     return this.toStoredObject(file);
+  }
+
+  async startResumableUpload(
+    name: string,
+    size: number,
+    parentId?: string,
+    mimeType = "application/octet-stream",
+  ): Promise<string> {
+    const response = await this.fetchWithAuth(
+      "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,mimeType,md5Checksum",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json; charset=UTF-8",
+          "X-Upload-Content-Length": String(size),
+          "X-Upload-Content-Type": mimeType,
+        },
+        body: JSON.stringify({
+          name,
+          parents: parentId ? [parentId] : undefined,
+        }),
+      },
+    );
+    if (!response.ok) {
+      const body = await response.text();
+      throw new StorageProviderError(
+        `Google Drive recusou o início do upload (${response.status}): ${body.slice(0, 300)}`,
+        response.status,
+      );
+    }
+    const location = response.headers.get("location");
+    if (!location) {
+      throw new StorageProviderError(
+        "O Google Drive não retornou a sessão de upload resumível.",
+      );
+    }
+    return location;
+  }
+
+  async uploadResumableChunk(
+    resumableUri: string,
+    chunk: Uint8Array,
+    start: number,
+    total: number,
+    mimeType = "application/octet-stream",
+  ): Promise<ResumableUploadProgress> {
+    if (chunk.byteLength <= 0 || start < 0 || start + chunk.byteLength > total) {
+      throw new StorageProviderError("Intervalo inválido para o bloco de upload.");
+    }
+    const end = start + chunk.byteLength - 1;
+    const response = await this.fetchWithAuth(resumableUri, {
+      method: "PUT",
+      headers: {
+        "Content-Length": String(chunk.byteLength),
+        "Content-Range": `bytes ${start}-${end}/${total}`,
+        "Content-Type": mimeType,
+      },
+      body: Buffer.from(chunk),
+    });
+    if (response.status === 308) {
+      return {
+        complete: false,
+        uploadedBytes: parseGoogleUploadedBytes(response.headers.get("range")),
+      };
+    }
+    if (!response.ok) {
+      const body = await response.text();
+      throw new StorageProviderError(
+        `Google Drive recusou o bloco (${response.status}): ${body.slice(0, 300)}`,
+        response.status,
+      );
+    }
+    const file = (await response.json()) as DriveFile;
+    return {
+      complete: true,
+      uploadedBytes: Number(file.size ?? total),
+      object: this.toStoredObject(file),
+    };
+  }
+
+  async getResumableUploadStatus(
+    resumableUri: string,
+    total: number,
+  ): Promise<ResumableUploadProgress> {
+    const response = await this.fetchWithAuth(resumableUri, {
+      method: "PUT",
+      headers: {
+        "Content-Length": "0",
+        "Content-Range": `bytes */${total}`,
+      },
+    });
+    if (response.status === 308) {
+      return {
+        complete: false,
+        uploadedBytes: parseGoogleUploadedBytes(response.headers.get("range")),
+      };
+    }
+    if (!response.ok) {
+      const body = await response.text();
+      throw new StorageProviderError(
+        `Não foi possível consultar o upload no Google Drive (${response.status}): ${body.slice(0, 300)}`,
+        response.status,
+      );
+    }
+    const file = (await response.json()) as DriveFile;
+    return {
+      complete: true,
+      uploadedBytes: Number(file.size ?? total),
+      object: this.toStoredObject(file),
+    };
   }
 
   async download(id: string): Promise<ReadableStream<Uint8Array>> {

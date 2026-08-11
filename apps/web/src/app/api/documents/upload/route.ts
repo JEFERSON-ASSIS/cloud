@@ -7,12 +7,30 @@ import { ensureDriveRoot, ensureSectorDriveFolder } from "@/server/google-drive"
 import { writeAudit } from "@/server/audit";
 import { assertSectorPermission } from "@i7ai/security";
 import { canManageDocuments } from "@/server/document-access";
+import { userFacingStorageError } from "@/server/storage-error";
 
 export async function POST(request: Request) {
   let remoteFileId: string | undefined;
   let uploadedDrive: Awaited<ReturnType<typeof ensureDriveRoot>>["drive"] | undefined;
+  let actorRole: string | null | undefined;
   try {
+    const contentLength = Number(request.headers.get("content-length"));
+    const legacyLimit = 16 * 1024 * 1024;
+    if (
+      !Number.isSafeInteger(contentLength) ||
+      contentLength <= 0 ||
+      contentLength > legacyLimit
+    ) {
+      return Response.json(
+        {
+          error:
+            "Use o upload resumível para arquivos maiores. Esta rota aceita no máximo 16 MB.",
+        },
+        { status: 413 },
+      );
+    }
     const tenant = await requireTenant("document.read");
+    actorRole = tenant.role;
     const data = await request.formData();
     const file = data.get("file");
     const folderId = data.get("folderId")?.toString() || null;
@@ -174,8 +192,21 @@ export async function POST(request: Request) {
         await uploadedDrive?.delete(remoteFileId);
       } catch {}
     }
+    console.error(
+      JSON.stringify({
+        scope: "document-upload",
+        event: "legacy-upload-failed",
+        error: error instanceof Error ? error.message : "Erro desconhecido",
+      }),
+    );
     return Response.json(
-      { error: error instanceof Error ? error.message : "Falha no upload." },
+      {
+        error: userFacingStorageError(
+          error,
+          actorRole,
+          "Não foi possível enviar o arquivo ao armazenamento em nuvem.",
+        ),
+      },
       { status: 400 },
     );
   }

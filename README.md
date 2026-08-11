@@ -58,6 +58,8 @@ O Google Drive está implementado com OAuth 2.0, renovação de tokens, criptogr
 
 O módulo de arquivos oferece upload múltiplo com progresso, pastas, movimentação, busca, grade/lista, preview de PDF, imagens, texto e JSON, download e lixeira sincronizada. A tela de Integrações permite testar a conexão, consultar quota e escolher uma pasta raiz do Google Drive.
 
+Arquivos grandes usam upload resumível em blocos, com reserva de quota, retomada e validação de integridade. Veja [uploads grandes](docs/uploads-grandes.md).
+
 ## Testes e troubleshooting
 
 Execute `npm test`. Se a saúde retornar `503`, confirme `DATABASE_URL`, o container PostgreSQL e as migrations. Se o login falhar, execute o seed e confirme que usuário, organização e vínculo estão ativos. Não use o segredo placeholder do build em execução real.

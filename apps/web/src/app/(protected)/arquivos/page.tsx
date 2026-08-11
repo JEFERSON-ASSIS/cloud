@@ -71,13 +71,98 @@ type UploadJob = {
   size: number;
   status: UploadStatus;
   progress: number;
+  phase?: "sending" | "validating";
   error?: string;
+};
+
+type UploadSessionResult = {
+  uploadId: string;
+  chunkSize: number;
+  uploadedBytes: number;
+};
+
+type UploadChunkResult = {
+  uploadedBytes: number;
+  complete: boolean;
+  readyToFinalize: boolean;
+};
+
+type UploadStatusResult = UploadChunkResult & {
+  uploadId: string;
+  chunkSize: number;
+  status: string;
+  size: number;
+  documentId?: string | null;
+  error?: string | null;
 };
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function responseJson<T>(response: Response): Promise<T> {
+  const result = (await response.json().catch(() => ({}))) as T & {
+    error?: string;
+  };
+  if (!response.ok) throw new Error(result.error || "Falha no upload.");
+  return result;
+}
+
+function sendUploadChunk(input: {
+  url: string;
+  chunk: Blob;
+  start: number;
+  total: number;
+  onProgress: (loaded: number) => void;
+}): Promise<UploadChunkResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const end = input.start + input.chunk.size - 1;
+    xhr.open("PUT", input.url);
+    xhr.setRequestHeader(
+      "Content-Range",
+      `bytes ${input.start}-${end}/${input.total}`,
+    );
+    xhr.upload.onprogress = (event) => input.onProgress(event.loaded);
+    xhr.onload = () => {
+      let result: (UploadChunkResult & { error?: string }) | undefined;
+      try {
+        result = JSON.parse(xhr.responseText || "{}") as UploadChunkResult & {
+          error?: string;
+        };
+      } catch {
+        result = undefined;
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && result) resolve(result);
+      else reject(new Error(result?.error || "Falha ao enviar uma parte do arquivo."));
+    };
+    xhr.onerror = () => reject(new Error("Conexão interrompida durante o upload."));
+    xhr.onabort = () => reject(new Error("Upload cancelado."));
+    xhr.send(input.chunk);
+  });
+}
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+function uploadResumeKey(
+  file: File,
+  organizationId: string | null,
+  sectorId: string | null,
+  folderId: string | null,
+) {
+  return [
+    "i7ai-upload",
+    organizationId || "default",
+    sectorId || "root",
+    folderId || "root",
+    file.name,
+    file.size,
+    file.lastModified,
+  ].join(":");
 }
 
 export default function FilesPage() {
@@ -188,39 +273,115 @@ export default function FilesPage() {
     for (let i = 0; i < selected.length; i += 1) {
       const file = selected[i]!;
       const job = jobs[i]!;
-      patchUploadJob(job.id, { status: "uploading", progress: 0 });
-
-      const body = new FormData();
-      body.set("file", file);
-      if (folderId) body.set("folderId", folderId);
-      if (activeSectorId) body.set("sectorId", activeSectorId);
-      if (activeOrganizationId) body.set("organizationId", activeOrganizationId);
+      patchUploadJob(job.id, { status: "uploading", progress: 0, phase: "sending" });
 
       try {
-        await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open("POST", "/api/documents/upload");
-          xhr.upload.onprogress = (event) => {
-            if (event.lengthComputable) {
-              patchUploadJob(job.id, {
-                progress: Math.round((event.loaded / event.total) * 100),
-              });
+        const organizationQuery = activeOrganizationId
+          ? `?organizationId=${encodeURIComponent(activeOrganizationId)}`
+          : "";
+        const resumeKey = uploadResumeKey(
+          file,
+          activeOrganizationId,
+          activeSectorId,
+          folderId,
+        );
+        let created: UploadSessionResult | undefined;
+        const savedUploadId = window.localStorage.getItem(resumeKey);
+        if (savedUploadId) {
+          const savedResponse = await fetch(
+            `/api/documents/uploads/${savedUploadId}${organizationQuery}`,
+          );
+          if (savedResponse.ok) {
+            const saved = (await savedResponse.json()) as UploadStatusResult;
+            if (saved.status === "COMPLETED" && saved.documentId) {
+              window.localStorage.removeItem(resumeKey);
+              patchUploadJob(job.id, { status: "done", progress: 100 });
+              hadSuccess = true;
+              continue;
             }
-          };
-          xhr.onload = () => {
-            let result: { error?: string } = {};
+            if (saved.status === "ACTIVE" && saved.size === file.size) {
+              created = {
+                uploadId: saved.uploadId,
+                chunkSize: saved.chunkSize,
+                uploadedBytes: saved.uploadedBytes,
+              };
+            }
+          }
+          if (!created) window.localStorage.removeItem(resumeKey);
+        }
+        if (!created) {
+          created = await responseJson<UploadSessionResult>(
+            await fetch("/api/documents/uploads", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                name: file.name,
+                size: file.size,
+                mimeType: file.type || "application/octet-stream",
+                folderId,
+                sectorId: activeSectorId,
+                organizationId: activeOrganizationId,
+              }),
+            }),
+          );
+          window.localStorage.setItem(resumeKey, created.uploadId);
+        }
+        const uploadUrl = `/api/documents/uploads/${created.uploadId}`;
+        let offset = created.uploadedBytes;
+        while (offset < file.size) {
+          const start = offset;
+          const end = Math.min(start + created.chunkSize, file.size);
+          const chunk = file.slice(start, end);
+          let sent = false;
+          let lastError: Error | undefined;
+          for (let attempt = 0; attempt < 3 && !sent; attempt += 1) {
             try {
-              result = JSON.parse(xhr.responseText || "{}") as { error?: string };
-            } catch {
-              result = {};
+              const result = await sendUploadChunk({
+                url: `${uploadUrl}/chunk${organizationQuery}`,
+                chunk,
+                start,
+                total: file.size,
+                onProgress: (loaded) => {
+                  patchUploadJob(job.id, {
+                    progress: Math.min(
+                      98,
+                      Math.round(((start + loaded) / file.size) * 100),
+                    ),
+                  });
+                },
+              });
+              offset = result.uploadedBytes;
+              sent = true;
+            } catch (chunkError) {
+              lastError =
+                chunkError instanceof Error
+                  ? chunkError
+                  : new Error("Falha ao enviar uma parte do arquivo.");
+              const statusResponse = await fetch(`${uploadUrl}${organizationQuery}`);
+              if (statusResponse.ok) {
+                const status = (await statusResponse.json()) as UploadStatusResult;
+                if (status.uploadedBytes > start || status.readyToFinalize) {
+                  offset = status.uploadedBytes;
+                  sent = true;
+                  break;
+                }
+              }
+              if (attempt < 2) await wait(500 * 2 ** attempt);
             }
-            if (xhr.status >= 200 && xhr.status < 300) resolve();
-            else reject(new Error(result.error ?? "Falha no upload."));
-          };
-          xhr.onerror = () =>
-            reject(new Error("Erro de conexão durante o upload."));
-          xhr.send(body);
+          }
+          if (!sent) throw lastError ?? new Error("Falha ao enviar o arquivo.");
+        }
+        patchUploadJob(job.id, {
+          status: "uploading",
+          progress: 99,
+          phase: "validating",
         });
+        await responseJson(
+          await fetch(`${uploadUrl}/complete${organizationQuery}`, {
+            method: "POST",
+          }),
+        );
+        window.localStorage.removeItem(resumeKey);
         patchUploadJob(job.id, { status: "done", progress: 100 });
         hadSuccess = true;
       } catch (uploadError) {
@@ -478,7 +639,10 @@ export default function FilesPage() {
                         <Typography variant="caption" color="text.secondary">
                           {formatBytes(job.size)}
                           {job.status === "pending" && " · Na fila"}
-                          {job.status === "uploading" && ` · Enviando ${job.progress}%`}
+                          {job.status === "uploading" &&
+                            (job.phase === "validating"
+                              ? " · Validando integridade"
+                              : ` · Enviando ${job.progress}%`)}
                           {job.status === "done" && " · Enviado"}
                           {job.status === "error" && ` · ${job.error || "Erro"}`}
                         </Typography>
@@ -502,7 +666,9 @@ export default function FilesPage() {
                           : job.status === "error"
                             ? "Erro"
                             : job.status === "uploading"
-                              ? "Enviando"
+                              ? job.phase === "validating"
+                                ? "Validando"
+                                : "Enviando"
                               : "Aguardando"
                       }
                     />

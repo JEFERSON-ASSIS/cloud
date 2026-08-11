@@ -2,13 +2,16 @@ import { prisma } from "@i7ai/database";
 import { requireTenantOrganization } from "@/server/tenant";
 import { driveForOrganization } from "@/server/google-drive";
 import { writeAudit } from "@/server/audit";
+import { userFacingStorageError } from "@/server/storage-error";
 
 export async function GET(request: Request) {
+  let actorRole: string | null | undefined;
   try {
-    const { organizationId } = await requireTenantOrganization(
+    const { tenant, organizationId } = await requireTenantOrganization(
       "document.read",
       request,
     );
+    actorRole = tenant.role;
     if (new URL(request.url).searchParams.get("folders") === "1") {
       const { drive } = await driveForOrganization(organizationId);
       const folders = (await drive.list("root")).filter(
@@ -39,13 +42,14 @@ export async function GET(request: Request) {
     );
   } catch (error) {
     return Response.json(
-      { error: error instanceof Error ? error.message : "Erro interno." },
+      { error: userFacingStorageError(error, actorRole) },
       { status: 403 },
     );
   }
 }
 
 export async function PATCH(request: Request) {
+  let actorRole: string | null | undefined;
   try {
     const body = (await request.json()) as {
       rootFolderId?: string;
@@ -56,6 +60,7 @@ export async function PATCH(request: Request) {
       request,
       typeof body?.organizationId === "string" ? body.organizationId : null,
     );
+    actorRole = tenant.role;
     const { rootFolderId } = body;
     if (!rootFolderId) throw new Error("Selecione uma pasta.");
     const { connection, drive } = await driveForOrganization(organizationId);
@@ -77,18 +82,20 @@ export async function PATCH(request: Request) {
     return Response.json({ ok: true });
   } catch (error) {
     return Response.json(
-      { error: error instanceof Error ? error.message : "Erro interno." },
+      { error: userFacingStorageError(error, actorRole) },
       { status: 400 },
     );
   }
 }
 
 export async function POST(request: Request) {
+  let actorRole: string | null | undefined;
   try {
-    const { organizationId } = await requireTenantOrganization(
+    const { tenant, organizationId } = await requireTenantOrganization(
       "integration.manage",
       request,
     );
+    actorRole = tenant.role;
     const { connection, drive } = await driveForOrganization(organizationId);
     await drive.testConnection();
     const quota = await drive.getQuota();
@@ -103,18 +110,20 @@ export async function POST(request: Request) {
     return Response.json({ ok: true, quota });
   } catch (error) {
     return Response.json(
-      { error: error instanceof Error ? error.message : "Erro de conexão." },
+      { error: userFacingStorageError(error, actorRole, "Não foi possível testar a conexão com o armazenamento em nuvem.") },
       { status: 400 },
     );
   }
 }
 
 export async function DELETE(request: Request) {
+  let actorRole: string | null | undefined;
   try {
     const { tenant, organizationId } = await requireTenantOrganization(
       "integration.manage",
       request,
     );
+    actorRole = tenant.role;
     const connection = await prisma.storageConnection.findFirst({
       where: {
         organizationId,
@@ -143,7 +152,7 @@ export async function DELETE(request: Request) {
     return Response.json({ ok: true });
   } catch (error) {
     return Response.json(
-      { error: error instanceof Error ? error.message : "Erro interno." },
+      { error: userFacingStorageError(error, actorRole) },
       { status: 400 },
     );
   }

@@ -9,11 +9,13 @@ import {
 import { ensureDriveRoot } from "@/server/google-drive";
 import { writeAudit } from "@/server/audit";
 import { assertSectorAccess } from "@/server/sector-access";
+import { userFacingStorageError } from "@/server/storage-error";
 
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  let actorRole: string | null | undefined;
   try {
     const body = (await request.json()) as {
       action?: "rename" | "move" | "trash" | "restore";
@@ -23,6 +25,7 @@ export async function PATCH(
     };
     const { tenant, organizationId: requestedOrgId } =
       await requireTenantOrganization("document.read", request, body.organizationId);
+    actorRole = tenant.role;
     const { id } = await context.params;
     const folder = await prisma.folder.findFirst({
       where:
@@ -180,7 +183,7 @@ export async function PATCH(
     return Response.json({ ok: true });
   } catch (error) {
     return Response.json(
-      { error: error instanceof Error ? error.message : "Erro interno." },
+      { error: userFacingStorageError(error, actorRole, "Não foi possível atualizar a pasta no armazenamento em nuvem.") },
       { status: 400 },
     );
   }

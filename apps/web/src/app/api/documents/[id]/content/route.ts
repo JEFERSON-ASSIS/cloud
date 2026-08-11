@@ -3,14 +3,17 @@ import { requireTenantOrganization } from "@/server/tenant";
 import { driveForOrganization } from "@/server/google-drive";
 import { writeAudit } from "@/server/audit";
 import { assertSectorAccess } from "@/server/sector-access";
+import { userFacingStorageError } from "@/server/storage-error";
 
 export async function GET(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  let actorRole: string | null | undefined;
   try {
     const { tenant, organizationId: requestedOrgId } =
       await requireTenantOrganization("document.read", request);
+    actorRole = tenant.role;
     const { id } = await context.params;
     const document = await prisma.document.findFirst({
       where:
@@ -58,7 +61,7 @@ export async function GET(
     });
   } catch (error) {
     return Response.json(
-      { error: error instanceof Error ? error.message : "Erro interno." },
+      { error: userFacingStorageError(error, actorRole, "Não foi possível abrir o documento no armazenamento em nuvem.") },
       { status: 400 },
     );
   }

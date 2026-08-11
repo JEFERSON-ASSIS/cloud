@@ -5,11 +5,14 @@ import { ensureDriveRoot } from "@/server/google-drive";
 import { writeAudit } from "@/server/audit";
 import { assertSectorPermission } from "@i7ai/security";
 import { canManageDocuments } from "@/server/document-access";
+import { userFacingStorageError } from "@/server/storage-error";
 
 export async function POST(request: Request) {
   let remoteId: string | undefined;
+  let actorRole: string | null | undefined;
   try {
     const tenant = await requireTenant("document.read");
+    actorRole = tenant.role;
     const body = (await request.json()) as {
       name?: string;
       parentId?: string | null;
@@ -91,10 +94,11 @@ export async function POST(request: Request) {
   } catch (error) {
     return Response.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Não foi possível criar a pasta.",
+        error: userFacingStorageError(
+          error,
+          actorRole,
+          "Não foi possível criar a pasta no armazenamento em nuvem.",
+        ),
       },
       { status: 400 },
     );

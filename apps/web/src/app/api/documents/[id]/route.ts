@@ -4,11 +4,13 @@ import { assertFolder, cleanName } from "@/server/documents";
 import { driveForOrganization, ensureDriveRoot } from "@/server/google-drive";
 import { writeAudit } from "@/server/audit";
 import { assertSectorAccess } from "@/server/sector-access";
+import { userFacingStorageError } from "@/server/storage-error";
 
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  let actorRole: string | null | undefined;
   try {
     const body = (await request.json()) as {
       action?: "rename" | "move" | "trash" | "restore";
@@ -18,6 +20,7 @@ export async function PATCH(
     };
     const { tenant, organizationId: requestedOrgId } =
       await requireTenantOrganization("document.read", request, body.organizationId);
+    actorRole = tenant.role;
     const { id } = await context.params;
     const document = await prisma.document.findFirst({
       where:
@@ -133,7 +136,7 @@ export async function PATCH(
     return Response.json({ ok: true });
   } catch (error) {
     return Response.json(
-      { error: error instanceof Error ? error.message : "Erro interno." },
+      { error: userFacingStorageError(error, actorRole, "Não foi possível atualizar o documento no armazenamento em nuvem.") },
       { status: 400 },
     );
   }
@@ -143,9 +146,11 @@ export async function DELETE(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  let actorRole: string | null | undefined;
   try {
     const { tenant, organizationId: requestedOrgId } =
       await requireTenantOrganization("document.read", request);
+    actorRole = tenant.role;
     const { id } = await context.params;
     const document = await prisma.document.findFirst({
       where:
@@ -186,7 +191,7 @@ export async function DELETE(
     return Response.json({ ok: true });
   } catch (error) {
     return Response.json(
-      { error: error instanceof Error ? error.message : "Erro interno." },
+      { error: userFacingStorageError(error, actorRole, "Não foi possível excluir o documento do armazenamento em nuvem.") },
       { status: 400 },
     );
   }

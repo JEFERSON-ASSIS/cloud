@@ -4,12 +4,15 @@ import { encryptSecret } from "@/server/encryption";
 import { exchangeGoogleCode } from "@/server/google-drive";
 import { verifyOAuthState } from "@/server/oauth-state";
 import { writeAudit } from "@/server/audit";
+import { userFacingStorageError } from "@/server/storage-error";
 
 export async function GET(request: Request) {
+  let actorRole: string | null | undefined;
   const redirect = (query: string) =>
     Response.redirect(`${process.env.APP_URL}/integracoes?${query}`);
   try {
     const session = await auth();
+    actorRole = session?.user?.role;
     const url = new URL(request.url);
     if (url.searchParams.get("error"))
       return redirect("error=Autoriza%C3%A7%C3%A3o%20cancelada.");
@@ -93,7 +96,7 @@ export async function GET(request: Request) {
     return redirect("connected=1");
   } catch (error) {
     return redirect(
-      `error=${encodeURIComponent(error instanceof Error ? error.message : "Erro de conexão.")}`,
+      `error=${encodeURIComponent(userFacingStorageError(error, actorRole, "Não foi possível conectar o armazenamento em nuvem."))}`,
     );
   }
 }

@@ -41,6 +41,15 @@ enum DocumentStatus {
   DELETED
 }
 
+enum DocumentUploadStatus {
+  ACTIVE
+  FINALIZING
+  COMPLETED
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
 enum BackupType {
   MYSQL
   POSTGRESQL
@@ -77,23 +86,24 @@ enum SectorRole {
 }
 
 model User {
-  id                   String               @id @default(uuid()) @db.Uuid
-  name                 String
-  email                String               @unique
-  passwordHash         String               @map("password_hash")
-  status               UserStatus           @default(ACTIVE)
-  emailVerifiedAt      DateTime?            @map("email_verified_at")
-  lastLoginAt          DateTime?            @map("last_login_at")
-  createdAt            DateTime             @default(now()) @map("created_at")
-  updatedAt            DateTime             @updatedAt @map("updated_at")
-  deletedAt            DateTime?            @map("deleted_at")
-  organizations        OrganizationUser[]
-  createdOrganizations Organization[]       @relation("OrganizationCreator")
-  passwordResetTokens  PasswordResetToken[]
-  auditLogs            AuditLog[]
-  documents            Document[]           @relation("DocumentUploader")
-  folders              Folder[]             @relation("FolderCreator")
-  sectors              SectorUser[]
+  id                     String                  @id @default(uuid()) @db.Uuid
+  name                   String
+  email                  String                  @unique
+  passwordHash           String                  @map("password_hash")
+  status                 UserStatus              @default(ACTIVE)
+  emailVerifiedAt        DateTime?               @map("email_verified_at")
+  lastLoginAt            DateTime?               @map("last_login_at")
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+  deletedAt              DateTime?               @map("deleted_at")
+  organizations          OrganizationUser[]
+  createdOrganizations   Organization[]          @relation("OrganizationCreator")
+  passwordResetTokens    PasswordResetToken[]
+  auditLogs              AuditLog[]
+  documents              Document[]              @relation("DocumentUploader")
+  folders                Folder[]                @relation("FolderCreator")
+  sectors                SectorUser[]
+  documentUploadSessions DocumentUploadSession[]
 
   @@map("users")
 }
@@ -112,30 +122,31 @@ model PasswordResetToken {
 }
 
 model Organization {
-  id                   String                @id @default(uuid()) @db.Uuid
-  name                 String
-  slug                 String                @unique
-  document             String?
-  status               OrganizationStatus    @default(ACTIVE)
-  storageLimit         BigInt                @default(10737418240) @map("storage_limit")
-  maxUploadFileSize    BigInt                @default(104857600) @map("max_upload_file_size")
-  createdById          String?               @map("created_by_id") @db.Uuid
-  createdAt            DateTime              @default(now()) @map("created_at")
-  updatedAt            DateTime              @updatedAt @map("updated_at")
-  deletedAt            DateTime?             @map("deleted_at")
-  createdBy            User?                 @relation("OrganizationCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  users                OrganizationUser[]
-  storageConnections   StorageConnection[]
-  folders              Folder[]
-  documents            Document[]
-  servers              Server[]
-  backupSources        BackupSource[]
-  backupSchedules      BackupSchedule[]
-  backupRuns           BackupRun[]
-  auditLogs            AuditLog[]
-  notificationSettings NotificationSetting[]
-  sectors              Sector[]
-  storageSpaces        StorageSpace[]
+  id                     String                  @id @default(uuid()) @db.Uuid
+  name                   String
+  slug                   String                  @unique
+  document               String?
+  status                 OrganizationStatus      @default(ACTIVE)
+  storageLimit           BigInt                  @default(10737418240) @map("storage_limit")
+  maxUploadFileSize      BigInt                  @default(104857600) @map("max_upload_file_size")
+  createdById            String?                 @map("created_by_id") @db.Uuid
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+  deletedAt              DateTime?               @map("deleted_at")
+  createdBy              User?                   @relation("OrganizationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  users                  OrganizationUser[]
+  storageConnections     StorageConnection[]
+  folders                Folder[]
+  documents              Document[]
+  servers                Server[]
+  backupSources          BackupSource[]
+  backupSchedules        BackupSchedule[]
+  backupRuns             BackupRun[]
+  auditLogs              AuditLog[]
+  notificationSettings   NotificationSetting[]
+  sectors                Sector[]
+  storageSpaces          StorageSpace[]
+  documentUploadSessions DocumentUploadSession[]
 
   @@index([status, deletedAt])
   @@map("organizations")
@@ -199,18 +210,19 @@ model OrganizationUser {
 }
 
 model StorageConnection {
-  id             String                 @id @default(uuid()) @db.Uuid
-  organizationId String                 @map("organization_id") @db.Uuid
-  provider       StorageProvider
-  name           String
-  status         ConnectionStatus       @default(PENDING)
-  createdAt      DateTime               @default(now()) @map("created_at")
-  updatedAt      DateTime               @updatedAt @map("updated_at")
-  deletedAt      DateTime?              @map("deleted_at")
-  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  googleDrive    GoogleDriveConnection?
-  documents      Document[]
-  backupFiles    BackupFile[]
+  id                     String                  @id @default(uuid()) @db.Uuid
+  organizationId         String                  @map("organization_id") @db.Uuid
+  provider               StorageProvider
+  name                   String
+  status                 ConnectionStatus        @default(PENDING)
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+  deletedAt              DateTime?               @map("deleted_at")
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  googleDrive            GoogleDriveConnection?
+  documents              Document[]
+  backupFiles            BackupFile[]
+  documentUploadSessions DocumentUploadSession[]
 
   @@index([organizationId, status])
   @@map("storage_connections")
@@ -233,25 +245,26 @@ model GoogleDriveConnection {
 }
 
 model Folder {
-  id              String       @id @default(uuid()) @db.Uuid
-  organizationId  String       @map("organization_id") @db.Uuid
-  parentId        String?      @map("parent_id") @db.Uuid
-  name            String
-  storageFolderId String?      @map("storage_folder_id")
-  createdById     String       @map("created_by_id") @db.Uuid
-  createdAt       DateTime     @default(now()) @map("created_at")
-  updatedAt       DateTime     @updatedAt @map("updated_at")
-  deletedAt       DateTime?    @map("deleted_at")
-  previousParentId String?     @map("previous_parent_id") @db.Uuid
-  sectorId        String?      @map("sector_id") @db.Uuid
-  storageSpaceId  String?      @map("storage_space_id") @db.Uuid
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  parent          Folder?      @relation("FolderTree", fields: [parentId], references: [id], onDelete: Restrict)
-  children        Folder[]     @relation("FolderTree")
-  createdBy       User         @relation("FolderCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  sector          Sector?      @relation(fields: [sectorId], references: [id], onDelete: SetNull)
-  storageSpace    StorageSpace? @relation(fields: [storageSpaceId], references: [id], onDelete: SetNull)
-  documents       Document[]
+  id                     String                  @id @default(uuid()) @db.Uuid
+  organizationId         String                  @map("organization_id") @db.Uuid
+  parentId               String?                 @map("parent_id") @db.Uuid
+  name                   String
+  storageFolderId        String?                 @map("storage_folder_id")
+  createdById            String                  @map("created_by_id") @db.Uuid
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+  deletedAt              DateTime?               @map("deleted_at")
+  previousParentId       String?                 @map("previous_parent_id") @db.Uuid
+  sectorId               String?                 @map("sector_id") @db.Uuid
+  storageSpaceId         String?                 @map("storage_space_id") @db.Uuid
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent                 Folder?                 @relation("FolderTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children               Folder[]                @relation("FolderTree")
+  createdBy              User                    @relation("FolderCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  sector                 Sector?                 @relation(fields: [sectorId], references: [id], onDelete: SetNull)
+  storageSpace           StorageSpace?           @relation(fields: [storageSpaceId], references: [id], onDelete: SetNull)
+  documents              Document[]
+  documentUploadSessions DocumentUploadSession[]
 
   @@unique([organizationId, parentId, name])
   @@index([organizationId, deletedAt])
@@ -259,35 +272,71 @@ model Folder {
 }
 
 model Document {
-  id                  String            @id @default(uuid()) @db.Uuid
-  organizationId      String            @map("organization_id") @db.Uuid
-  folderId            String?           @map("folder_id") @db.Uuid
-  uploadedById        String            @map("uploaded_by") @db.Uuid
-  storageConnectionId String            @map("storage_connection_id") @db.Uuid
-  storageFileId       String            @map("storage_file_id")
+  id                  String                 @id @default(uuid()) @db.Uuid
+  organizationId      String                 @map("organization_id") @db.Uuid
+  folderId            String?                @map("folder_id") @db.Uuid
+  uploadedById        String                 @map("uploaded_by") @db.Uuid
+  storageConnectionId String                 @map("storage_connection_id") @db.Uuid
+  storageFileId       String                 @map("storage_file_id")
   name                String
-  originalName        String            @map("original_name")
-  mimeType            String            @map("mime_type")
+  originalName        String                 @map("original_name")
+  mimeType            String                 @map("mime_type")
   extension           String?
   size                BigInt
-  checksumSha256      String            @map("checksum_sha256")
-  status              DocumentStatus    @default(UPLOADING)
-  createdAt           DateTime          @default(now()) @map("created_at")
-  updatedAt           DateTime          @updatedAt @map("updated_at")
-  deletedAt           DateTime?         @map("deleted_at")
-  previousFolderId    String?           @map("previous_folder_id") @db.Uuid
-  sectorId            String?           @map("sector_id") @db.Uuid
-  storageSpaceId      String?           @map("storage_space_id") @db.Uuid
-  organization        Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  folder              Folder?           @relation(fields: [folderId], references: [id], onDelete: Restrict)
-  uploadedBy          User              @relation("DocumentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
-  storageConnection   StorageConnection @relation(fields: [storageConnectionId], references: [id], onDelete: Restrict)
-  sector              Sector?           @relation(fields: [sectorId], references: [id], onDelete: SetNull)
-  storageSpace        StorageSpace?     @relation(fields: [storageSpaceId], references: [id], onDelete: SetNull)
+  checksumSha256      String                 @map("checksum_sha256")
+  status              DocumentStatus         @default(UPLOADING)
+  createdAt           DateTime               @default(now()) @map("created_at")
+  updatedAt           DateTime               @updatedAt @map("updated_at")
+  deletedAt           DateTime?              @map("deleted_at")
+  previousFolderId    String?                @map("previous_folder_id") @db.Uuid
+  sectorId            String?                @map("sector_id") @db.Uuid
+  storageSpaceId      String?                @map("storage_space_id") @db.Uuid
+  organization        Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  folder              Folder?                @relation(fields: [folderId], references: [id], onDelete: Restrict)
+  uploadedBy          User                   @relation("DocumentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  storageConnection   StorageConnection      @relation(fields: [storageConnectionId], references: [id], onDelete: Restrict)
+  sector              Sector?                @relation(fields: [sectorId], references: [id], onDelete: SetNull)
+  storageSpace        StorageSpace?          @relation(fields: [storageSpaceId], references: [id], onDelete: SetNull)
+  uploadSession       DocumentUploadSession?
 
   @@unique([storageConnectionId, storageFileId])
   @@index([organizationId, folderId, deletedAt])
   @@map("documents")
+}
+
+model DocumentUploadSession {
+  id                    String               @id @default(uuid()) @db.Uuid
+  organizationId        String               @map("organization_id") @db.Uuid
+  userId                String               @map("user_id") @db.Uuid
+  folderId              String?              @map("folder_id") @db.Uuid
+  sectorId              String?              @map("sector_id") @db.Uuid
+  storageSpaceId        String?              @map("storage_space_id") @db.Uuid
+  storageConnectionId   String               @map("storage_connection_id") @db.Uuid
+  documentId            String?              @unique @map("document_id") @db.Uuid
+  name                  String
+  originalName          String               @map("original_name")
+  mimeType              String               @map("mime_type")
+  size                  BigInt
+  encryptedResumableUri String               @map("encrypted_resumable_uri")
+  storageFileId         String?              @map("storage_file_id")
+  bytesUploaded         BigInt               @default(0) @map("bytes_uploaded")
+  status                DocumentUploadStatus @default(ACTIVE)
+  errorMessage          String?              @map("error_message")
+  expiresAt             DateTime             @map("expires_at")
+  createdAt             DateTime             @default(now()) @map("created_at")
+  updatedAt             DateTime             @updatedAt @map("updated_at")
+  completedAt           DateTime?            @map("completed_at")
+  organization          Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user                  User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folder                Folder?              @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  sector                Sector?              @relation(fields: [sectorId], references: [id], onDelete: SetNull)
+  storageSpace          StorageSpace?        @relation(fields: [storageSpaceId], references: [id], onDelete: SetNull)
+  storageConnection     StorageConnection    @relation(fields: [storageConnectionId], references: [id], onDelete: Cascade)
+  document              Document?            @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status, expiresAt])
+  @@index([userId, status, createdAt])
+  @@map("document_upload_sessions")
 }
 
 model Server {
@@ -463,54 +512,56 @@ model NotificationSetting {
 }
 
 model Sector {
-  id             String          @id @default(uuid()) @db.Uuid
-  organizationId String          @map("organization_id") @db.Uuid
-  name           String
-  quotaLimit     BigInt          @default(1073741824) @map("quota_limit")
-  createdAt      DateTime        @default(now()) @map("created_at")
-  updatedAt      DateTime        @updatedAt @map("updated_at")
-  deletedAt      DateTime?       @map("deleted_at")
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  users          SectorUser[]
-  storageSpaces  StorageSpace[]
-  folders        Folder[]
-  documents      Document[]
-  backupSources  BackupSource[]
-  backupSchedules BackupSchedule[]
-  backupRuns     BackupRun[]
-  backupFiles    BackupFile[]
+  id                     String                  @id @default(uuid()) @db.Uuid
+  organizationId         String                  @map("organization_id") @db.Uuid
+  name                   String
+  quotaLimit             BigInt                  @default(1073741824) @map("quota_limit")
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+  deletedAt              DateTime?               @map("deleted_at")
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users                  SectorUser[]
+  storageSpaces          StorageSpace[]
+  folders                Folder[]
+  documents              Document[]
+  backupSources          BackupSource[]
+  backupSchedules        BackupSchedule[]
+  backupRuns             BackupRun[]
+  backupFiles            BackupFile[]
+  documentUploadSessions DocumentUploadSession[]
 
   @@unique([organizationId, name])
   @@map("sectors")
 }
 
 model SectorUser {
-  id             String      @id @default(uuid()) @db.Uuid
-  sectorId       String      @map("sector_id") @db.Uuid
-  userId         String      @map("user_id") @db.Uuid
-  role           SectorRole  @default(VIEWER_DOWNLOAD)
-  createdAt      DateTime    @default(now()) @map("created_at")
-  updatedAt      DateTime    @updatedAt @map("updated_at")
-  sector         Sector      @relation(fields: [sectorId], references: [id], onDelete: Cascade)
-  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String     @id @default(uuid()) @db.Uuid
+  sectorId  String     @map("sector_id") @db.Uuid
+  userId    String     @map("user_id") @db.Uuid
+  role      SectorRole @default(VIEWER_DOWNLOAD)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  sector    Sector     @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([sectorId, userId])
   @@map("sector_users")
 }
 
 model StorageSpace {
-  id             String       @id @default(uuid()) @db.Uuid
-  organizationId String       @map("organization_id") @db.Uuid
-  sectorId       String       @map("sector_id") @db.Uuid
-  name           String
-  rootFolderId   String?      @map("root_folder_id")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
-  deletedAt      DateTime?    @map("deleted_at")
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  sector         Sector       @relation(fields: [sectorId], references: [id], onDelete: Cascade)
-  folders        Folder[]
-  documents      Document[]
+  id                     String                  @id @default(uuid()) @db.Uuid
+  organizationId         String                  @map("organization_id") @db.Uuid
+  sectorId               String                  @map("sector_id") @db.Uuid
+  name                   String
+  rootFolderId           String?                 @map("root_folder_id")
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+  deletedAt              DateTime?               @map("deleted_at")
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sector                 Sector                  @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+  folders                Folder[]
+  documents              Document[]
+  documentUploadSessions DocumentUploadSession[]
 
   @@unique([sectorId, name])
   @@map("storage_spaces")

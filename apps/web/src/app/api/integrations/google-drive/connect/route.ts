@@ -1,13 +1,16 @@
 import { requireTenantOrganization } from "@/server/tenant";
 import { createOAuthState } from "@/server/oauth-state";
 import { googleAuthorizationUrl } from "@/server/google-drive";
+import { userFacingStorageError } from "@/server/storage-error";
 
 export async function GET(request: Request) {
+  let actorRole: string | null | undefined;
   try {
     const { tenant, organizationId } = await requireTenantOrganization(
       "integration.manage",
       request,
     );
+    actorRole = tenant.role;
     const state = createOAuthState({
       organizationId,
       userId: tenant.userId,
@@ -16,7 +19,11 @@ export async function GET(request: Request) {
     return Response.redirect(googleAuthorizationUrl(state));
   } catch (error) {
     const message = encodeURIComponent(
-      error instanceof Error ? error.message : "Erro de conexão.",
+      userFacingStorageError(
+        error,
+        actorRole,
+        "Não foi possível conectar o armazenamento em nuvem.",
+      ),
     );
     return Response.redirect(
       `${process.env.APP_URL}/integracoes?error=${message}`,
