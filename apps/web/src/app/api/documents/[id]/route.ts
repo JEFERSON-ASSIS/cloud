@@ -48,9 +48,13 @@ export async function PATCH(
       sectorOpts,
     );
 
+    const organization = await prisma.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: { name: true },
+    });
     const { drive, rootFolderId } = await ensureDriveRoot(
       organizationId,
-      "Documentos",
+      organization.name,
     );
     let action = "DOCUMENT_UPDATED";
     if (body.action === "rename") {

@@ -6,7 +6,7 @@ import {
   isDescendant,
   syncFolderTreeSector,
 } from "@/server/documents";
-import { ensureDriveRoot } from "@/server/google-drive";
+import { driveForOrganization } from "@/server/google-drive";
 import { writeAudit } from "@/server/audit";
 import { assertSectorAccess } from "@/server/sector-access";
 import { userFacingStorageError } from "@/server/storage-error";
@@ -54,7 +54,7 @@ export async function PATCH(
       sectorOpts,
     );
 
-    const { drive } = await ensureDriveRoot(organizationId, "Documentos");
+    const { drive } = await driveForOrganization(organizationId);
     let action = "FOLDER_UPDATED";
     if (body.action === "rename") {
       const name = cleanName(body.name ?? "");

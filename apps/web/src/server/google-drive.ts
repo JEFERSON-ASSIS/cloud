@@ -132,12 +132,19 @@ export async function ensureDriveRoot(
       ...result,
       rootFolderId: result.connection.googleDrive!.rootFolderId!,
     };
-  const root = await result.drive.createFolder("i7AI Cloud");
-  const documents = await result.drive.createFolder("Documents", root);
-  const organization = await result.drive.createFolder(
-    organizationName,
-    documents,
-  );
+  // Reusa pastas ja existentes: duas requisicoes concorrentes leriam
+  // rootFolderId vazio e criariam a arvore em duplicidade.
+  const folderNamed = async (name: string, parentId?: string) => {
+    const existing = (await result.drive.list(parentId ?? "root")).find(
+      (item) =>
+        item.mimeType === "application/vnd.google-apps.folder" &&
+        item.name === name,
+    );
+    return existing?.id ?? result.drive.createFolder(name, parentId);
+  };
+  const root = await folderNamed("i7AI Cloud");
+  const documents = await folderNamed("Documents", root);
+  const organization = await folderNamed(organizationName, documents);
   await prisma.googleDriveConnection.update({
     where: { id: result.connection.googleDrive!.id },
     data: { rootFolderId: organization },
