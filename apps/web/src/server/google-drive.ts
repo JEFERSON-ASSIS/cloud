@@ -23,7 +23,7 @@ export function googleAuthorizationUrl(state: string) {
     prompt: "consent",
     include_granted_scopes: "true",
     scope:
-      "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email",
     state,
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;

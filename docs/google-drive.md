@@ -7,7 +7,16 @@
 3. Configure a tela de consentimento OAuth.
 4. Crie credenciais OAuth 2.0 do tipo Aplicativo da Web.
 5. Cadastre exatamente o valor de `GOOGLE_REDIRECT_URI` como URI autorizada.
-6. Preencha `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` e `GOOGLE_REDIRECT_URI` no `.env` e reinicie o serviço web.
+6. Em Acesso a dados, cadastre os escopos `drive.file`, `userinfo.email`, `userinfo.profile` e `openid`.
+7. Preencha `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` e `GOOGLE_REDIRECT_URI` no `.env` e reinicie o serviço web.
+
+## Escopos
+
+O app solicita `https://www.googleapis.com/auth/drive.file`, que concede acesso apenas aos arquivos e pastas criados pelo próprio app. Todo o conteúdo gerenciado nasce dentro do i7AI Cloud, então esse escopo é suficiente.
+
+Não use `https://www.googleapis.com/auth/drive` (acesso total). Ele é classificado pelo Google como escopo restrito e exige verificação com auditoria de segurança por terceiro; sem isso o consentimento exibe a tela "O Google não verificou este app" e o acesso fica limitado a 100 usuários.
+
+Consequência prática do `drive.file`: arquivos colocados manualmente no Drive, fora do app, não são visíveis para ele.
 
 Para a instalação local atual:
 
