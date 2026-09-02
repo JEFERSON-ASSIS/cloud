@@ -14,6 +14,7 @@ import {
   CloudUpload,
   Delete,
   Download,
+  DriveFolderUpload,
   Error as ErrorIcon,
   Folder,
   GridView,
@@ -31,6 +32,7 @@ import {
   Breadcrumbs,
   Button,
   Card,
+  Checkbox,
   Chip,
   Dialog,
   DialogActions,
@@ -50,6 +52,20 @@ import {
 import { DocumentPreview } from "@/components/DocumentPreview/DocumentPreview";
 import { useActiveTenant } from "@/components/AppShell/ActiveTenantContext";
 import { resolveFilesBackTarget } from "@/lib/files-navigation";
+import {
+  collectDroppedEntries,
+  planFolderUploads,
+  relativePathOf,
+  type UploadEntry,
+} from "@/lib/upload-tree";
+import { createFolderResolver } from "@/lib/upload-folder-resolver";
+import {
+  isSelectable,
+  selectableKeys,
+  selectionKey,
+  toggleSelectAll,
+  toggleSelection,
+} from "@/lib/files-selection";
 import { useSearchParams } from "next/navigation";
 
 type Item = {
@@ -102,6 +118,7 @@ type UploadStatus = "pending" | "uploading" | "done" | "error";
 type UploadJob = {
   id: string;
   name: string;
+  folderPath?: string;
   size: number;
   status: UploadStatus;
   progress: number;
@@ -234,6 +251,16 @@ export default function FilesPage() {
   const [shareBusy, setShareBusy] = useState(false);
   const [shareError, setShareError] = useState("");
   const input = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+  // a seleção guarda o contexto em que foi feita; ao navegar para outra
+  // pasta/secretaria/lixeira/busca ela é descartada durante o render, para
+  // nunca excluir item que saiu da tela
+  const [selection, setSelection] = useState<{
+    scope: string;
+    keys: Set<string>;
+  }>({ scope: "", keys: new Set() });
+  const [bulkDialog, setBulkDialog] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const uploadingRef = useRef(false);
   const loadRequestRef = useRef(0);
 
@@ -285,6 +312,7 @@ export default function FilesPage() {
     }
   }, [folderId, search, trash, sharedView, activeOrganizationId, activeSectorId]);
 
+
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
     return () => {
@@ -316,9 +344,14 @@ export default function FilesPage() {
     );
   };
 
-  const uploadFiles = async (files: FileList | File[]) => {
-    const selected = Array.from(files);
-    if (!selected.length) return;
+  const uploadFiles = async (source: FileList | File[] | UploadEntry[]) => {
+    const entries: UploadEntry[] = Array.from(source as ArrayLike<unknown>).map(
+      (item) =>
+        item instanceof File
+          ? { file: item, path: relativePathOf(item) }
+          : (item as UploadEntry),
+    );
+    if (!entries.length) return;
     if (!folderId || sharedView || trash) {
       setError("Abra a pasta da secretaria antes de enviar arquivos.");
       return;
@@ -328,10 +361,45 @@ export default function FilesPage() {
       return;
     }
 
-    const jobs: UploadJob[] = selected.map((file, index) => ({
-      id: `${Date.now()}-${index}-${file.name}`,
-      name: file.name,
-      size: file.size,
+    const plan = planFolderUploads(entries);
+    const selected = plan.files;
+    const organizationQuery = activeOrganizationId
+      ? `?organizationId=${encodeURIComponent(activeOrganizationId)}`
+      : "";
+    const resolveFolder = createFolderResolver({
+      rootFolderId: folderId,
+      listFolders: async (parentId) => {
+        const params = new URLSearchParams({ folderId: parentId });
+        if (activeOrganizationId) params.set("organizationId", activeOrganizationId);
+        if (activeSectorId) params.set("sectorId", activeSectorId);
+        const response = await fetch(`/api/files?${params.toString()}`);
+        if (!response.ok) {
+          throw new Error("Não foi possível verificar as pastas de destino.");
+        }
+        return (await response.json()) as { folders: { id: string; name: string }[] };
+      },
+      createFolder: async (name, parentId) => {
+        const created = await responseJson<{ id: string }>(
+          await fetch("/api/folders", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name,
+              parentId,
+              sectorId: activeSectorId,
+              organizationId: activeOrganizationId,
+            }),
+          }),
+        );
+        return created.id;
+      },
+    });
+
+    const jobs: UploadJob[] = selected.map((entry, index) => ({
+      id: `${Date.now()}-${index}-${entry.file.name}`,
+      name: entry.file.name,
+      folderPath: entry.path.join("/"),
+      size: entry.file.size,
       status: "pending",
       progress: 0,
     }));
@@ -342,19 +410,17 @@ export default function FilesPage() {
 
     let hadSuccess = false;
     for (let i = 0; i < selected.length; i += 1) {
-      const file = selected[i]!;
+      const file = selected[i]!.file;
       const job = jobs[i]!;
       patchUploadJob(job.id, { status: "uploading", progress: 0, phase: "sending" });
 
       try {
-        const organizationQuery = activeOrganizationId
-          ? `?organizationId=${encodeURIComponent(activeOrganizationId)}`
-          : "";
+        const destinationFolderId = await resolveFolder(selected[i]!.path);
         const resumeKey = uploadResumeKey(
           file,
           activeOrganizationId,
           activeSectorId,
-          folderId,
+          destinationFolderId,
         );
         let created: UploadSessionResult | undefined;
         const savedUploadId = window.localStorage.getItem(resumeKey);
@@ -389,7 +455,7 @@ export default function FilesPage() {
                 name: file.name,
                 size: file.size,
                 mimeType: file.type || "application/octet-stream",
-                folderId,
+                folderId: destinationFolderId,
                 sectorId: activeSectorId,
                 organizationId: activeOrganizationId,
               }),
@@ -464,6 +530,7 @@ export default function FilesPage() {
 
     uploadingRef.current = false;
     if (input.current) input.current.value = "";
+    if (folderInput.current) folderInput.current.value = "";
     if (hadSuccess) await load();
   };
 
@@ -640,6 +707,54 @@ export default function FilesPage() {
   };
 
   const items = [...data.folders, ...data.documents];
+  const selectionScope = [
+    activeOrganizationId ?? "",
+    activeSectorId ?? "",
+    folderId ?? "",
+    search,
+    trash ? "1" : "",
+    sharedView ? "1" : "",
+  ].join("|");
+  const selected =
+    selection.scope === selectionScope ? selection.keys : new Set<string>();
+  const setSelected = (keys: Set<string>) =>
+    setSelection({ scope: selectionScope, keys });
+  const selectableItemKeys = selectableKeys(items, isReadOnly);
+  const selectedItems = items.filter(
+    (item) => isSelectable(item, isReadOnly) && selected.has(selectionKey(item)),
+  );
+
+  const trashSelected = async () => {
+    setBulkBusy(true);
+    let failed = 0;
+    for (const item of selectedItems) {
+      try {
+        const response = await fetch(
+          `/api/${item.kind === "folder" ? "folders" : "documents"}/${item.id}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "trash" }),
+          },
+        );
+        if (!response.ok) failed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    const total = selectedItems.length;
+    setBulkBusy(false);
+    setBulkDialog(false);
+    setSelected(new Set());
+    // `load` limpa o erro, então o aviso de falha parcial vem depois dele
+    await load();
+    if (failed) {
+      setError(
+        `${failed} de ${total} ${total === 1 ? "item não foi excluído" : "itens não foram excluídos"}.`,
+      );
+    }
+  };
+
   const backTarget = resolveFilesBackTarget({
     folderId,
     sharedView,
@@ -650,9 +765,14 @@ export default function FilesPage() {
     shareData?.sectors.find((sector) => sector.id === shareSectorId)?.users ?? [];
   const drop = (e: DragEvent) => {
     e.preventDefault();
-    if (!isReadOnly && !sharedView && !trash && folderId) {
-      void uploadFiles(e.dataTransfer.files);
-    }
+    if (isReadOnly || sharedView || trash || !folderId) return;
+    void (async () => {
+      try {
+        await uploadFiles(await collectDroppedEntries(e.dataTransfer));
+      } catch {
+        setError("Não foi possível ler a pasta arrastada.");
+      }
+    })();
   };
 
   return (
@@ -732,11 +852,38 @@ export default function FilesPage() {
             >
               Enviar arquivos
             </Button>
+            <Button
+              variant="contained"
+              size="medium"
+              disableElevation
+              startIcon={<DriveFolderUpload />}
+              onClick={() => folderInput.current?.click()}
+              sx={{
+                borderRadius: 2,
+                px: 2.5,
+                textTransform: "none",
+                fontWeight: 600,
+              }}
+            >
+              Enviar pasta
+            </Button>
             <input
               hidden
               multiple
               ref={input}
               type="file"
+              onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                e.target.files && void uploadFiles(e.target.files)
+              }
+            />
+            <input
+              hidden
+              multiple
+              ref={folderInput}
+              type="file"
+              // @ts-expect-error atributos de diretório não tipados no React
+              webkitdirectory=""
+              directory=""
               onChange={(e: ChangeEvent<HTMLInputElement>) =>
                 e.target.files && void uploadFiles(e.target.files)
               }
@@ -839,9 +986,9 @@ export default function FilesPage() {
                             textOverflow: "ellipsis",
                             whiteSpace: "nowrap",
                           }}
-                          title={job.name}
+                          title={job.folderPath ? `${job.folderPath}/${job.name}` : job.name}
                         >
-                          {job.name}
+                          {job.folderPath ? `${job.folderPath}/${job.name}` : job.name}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
                           {formatBytes(job.size)}
@@ -947,6 +1094,59 @@ export default function FilesPage() {
           </IconButton>
         </Tooltip>
       </Stack>
+      {selectableItemKeys.length > 0 && (
+        <Stack
+          direction="row"
+          spacing={1}
+          sx={{ alignItems: "center", px: 0.5, minHeight: 42 }}
+        >
+          <Checkbox
+            size="small"
+            slotProps={{ input: { "aria-label": "Selecionar todos" } }}
+            checked={
+              selectedItems.length > 0 &&
+              selectedItems.length === selectableItemKeys.length
+            }
+            indeterminate={
+              selectedItems.length > 0 &&
+              selectedItems.length < selectableItemKeys.length
+            }
+            onChange={() =>
+              setSelected(toggleSelectAll(selected, items, isReadOnly))
+            }
+          />
+          {selectedItems.length > 0 ? (
+            <>
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                {selectedItems.length}
+                {selectedItems.length === 1 ? " selecionado" : " selecionados"}
+              </Typography>
+              {!trash && (
+                <Button
+                  size="small"
+                  color="error"
+                  startIcon={<Delete fontSize="small" />}
+                  onClick={() => setBulkDialog(true)}
+                  sx={{ textTransform: "none", fontWeight: 600 }}
+                >
+                  Excluir
+                </Button>
+              )}
+              <Button
+                size="small"
+                onClick={() => setSelected(new Set())}
+                sx={{ textTransform: "none" }}
+              >
+                Limpar seleção
+              </Button>
+            </>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              Selecione itens para excluir vários de uma vez
+            </Typography>
+          )}
+        </Stack>
+      )}
       <Paper
         variant="outlined"
         sx={{
@@ -1007,6 +1207,20 @@ export default function FilesPage() {
                     }
                   }}
                 >
+                  {isSelectable(item, isReadOnly) && (
+                    <Checkbox
+                      size="small"
+                      sx={{ mr: 0.5 }}
+                      slotProps={{
+                        input: { "aria-label": `Selecionar ${item.name}` },
+                      }}
+                      checked={selected.has(selectionKey(item))}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={() =>
+                        setSelected(toggleSelection(selected, selectionKey(item)))
+                      }
+                    />
+                  )}
                   {item.kind === "folder" ? (
                     <Folder color="primary" sx={{ mr: 2 }} />
                   ) : (
@@ -1096,6 +1310,33 @@ export default function FilesPage() {
           </MenuItem>
         )}
       </Menu>
+      <Dialog open={bulkDialog} onClose={() => !bulkBusy && setBulkDialog(false)}>
+        <DialogTitle>
+          {selectedItems.length === 1
+            ? "Mover 1 item para a lixeira?"
+            : `Mover ${selectedItems.length} itens para a lixeira?`}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            Os itens continuam disponíveis na lixeira e podem ser restaurados.
+          </Typography>
+          {bulkBusy && <LinearProgress sx={{ mt: 2 }} />}
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={bulkBusy} onClick={() => setBulkDialog(false)}>
+            Cancelar
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            disableElevation
+            disabled={bulkBusy}
+            onClick={() => void trashSelected()}
+          >
+            Mover para a lixeira
+          </Button>
+        </DialogActions>
+      </Dialog>
       <Dialog
         open={!!shareItem}
         onClose={() => !shareBusy && setShareItem(null)}
