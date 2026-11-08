@@ -7,7 +7,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl ca-certificates curl default-mysql-client gzip tar coreutils \
     && install -d /usr/share/postgresql-common/pgdg \
-    && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && curl -fsSL --http1.1 --retry 5 --retry-all-errors --retry-delay 3 -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc \
     && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends postgresql-client-17 \
