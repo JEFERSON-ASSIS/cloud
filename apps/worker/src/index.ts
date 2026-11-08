@@ -5,7 +5,8 @@ import { testSshConnection, executeSshCommandWithInput, addBackupJob, sendBackup
 import { Worker, Job } from "bullmq";
 import { Client } from "ssh2";
 import { createHash } from "node:crypto";
-import { createWriteStream, unlinkSync, existsSync, mkdirSync, createReadStream } from "node:fs";
+import { createWriteStream, unlinkSync, existsSync, mkdirSync, createReadStream, statSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { exec, spawn } from "node:child_process";
@@ -527,19 +528,16 @@ const backupWorker = new Worker(
       await encryptFile(localTempFilePath, encryptedTempFilePath);
 
       await updateProgress(50, "Calculando Checksum", "CHECKSUM");
+      // Checksum lendo o arquivo em partes: o arquivo inteiro na memória derrubava o worker (OOM, limite de 1 GB)
       const hash = createHash("sha256");
-      const fileData = await new Promise<Buffer>((resolve, reject) => {
-        const chunks: Buffer[] = [];
+      await new Promise<void>((resolve, reject) => {
         const readStream = createReadStream(encryptedTempFilePath);
-        readStream.on("data", (chunk: any) => {
-          hash.update(chunk);
-          chunks.push(chunk);
-        });
-        readStream.on("end", () => resolve(Buffer.concat(chunks)));
+        readStream.on("data", (chunk: any) => hash.update(chunk));
+        readStream.on("end", () => resolve());
         readStream.on("error", (err: any) => reject(err));
       });
       const checksumSha256 = hash.digest("hex");
-      const fileSize = fileData.length;
+      const fileSize = statSync(encryptedTempFilePath).size;
 
       await log("INFO", `Checksum SHA-256 gerado (arquivo criptografado): ${checksumSha256} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`);
 
@@ -678,14 +676,30 @@ const backupWorker = new Worker(
       }
 
       await log("INFO", `Iniciando upload do backup criptografado (${filename}) para a pasta da Secretaria no armazenamento em nuvem...`);
-      const readableStream = createReadStream(encryptedTempFilePath);
-      
-      const stored = await drive.upload(
-        readableStream,
-        filename,
-        targetDriveFolderId,
-        "application/octet-stream"
-      );
+      // Upload resumível em blocos de 8 MiB (múltiplo de 256 KiB): a memória fica no tamanho de um bloco,
+      // não do arquivo inteiro (o upload multipart carregava o arquivo duas vezes na memória).
+      const CHUNK_BYTES = 8 * 1024 * 1024;
+      const uploadUri = await drive.startResumableUpload(filename, fileSize, targetDriveFolderId, "application/octet-stream");
+      let stored: { id: string } | undefined;
+      const handle = await open(encryptedTempFilePath, "r");
+      try {
+        let offset = 0;
+        while (offset < fileSize) {
+          const length = Math.min(CHUNK_BYTES, fileSize - offset);
+          const buffer = Buffer.alloc(length);
+          await handle.read(buffer, 0, length, offset);
+          const result = await drive.uploadResumableChunk(uploadUri, buffer, offset, fileSize, "application/octet-stream");
+          if (result.complete) {
+            stored = result.object;
+            break;
+          }
+          offset = result.uploadedBytes > offset ? result.uploadedBytes : offset + length;
+          await updateProgress(65 + Math.floor((25 * offset) / fileSize), "Fazendo upload para o armazenamento em nuvem", "UPLOADING");
+        }
+      } finally {
+        await handle.close();
+      }
+      if (!stored) throw new Error("O armazenamento em nuvem não confirmou o fim do upload.");
 
       await log("INFO", `Upload concluído. ID do arquivo: ${stored.id}`);
 
