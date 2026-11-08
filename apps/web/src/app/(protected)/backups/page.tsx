@@ -89,6 +89,7 @@ export default function BackupsPage() {
   const [editingSource, setEditingSource] = useState<BackupSource | null>(null);
   const [logDialogOpen, setLogDialogOpen] = useState(false);
   const [selectedRun, setSelectedRun] = useState<BackupRun | null>(null);
+  const [pollingRunSourceId, setPollingRunSourceId] = useState<string | null>(null);
   const [runLogs, setRunLogs] = useState<BackupLog[]>([]);
   const [pollingRunId, setPollingRunId] = useState<string | null>(null);
 
@@ -308,7 +309,9 @@ export default function BackupsPage() {
       const data = await res.json();
       if (res.ok) {
         setSuccess("Backup enfileirado com sucesso!");
-        // Acompanhar o log do backup disparado imediatamente
+        // Acompanhar o log do backup disparado imediatamente. A resposta do disparo não traz a origem
+        // (source): sem ela o título do diálogo quebrava a página ("reading 'name'").
+        setPollingRunSourceId(id);
         setSelectedRun(data);
         setRunLogs([]);
         setLogDialogOpen(true);
@@ -692,7 +695,7 @@ export default function BackupsPage() {
       {/* Dialogo de Logs e Detalhes da Execução */}
       <Dialog open={logDialogOpen} onClose={() => { setLogDialogOpen(false); setPollingRunId(null); }} fullWidth maxWidth="sm">
         <DialogTitle>
-          Execução de Backup: {selectedRun?.source.name}
+          Execução de Backup: {selectedRun?.source?.name ?? sources.find((s) => s.id === pollingRunSourceId)?.name ?? ""}
         </DialogTitle>
         <DialogContent dividers sx={{ height: "450px", display: "flex", flexDirection: "column", gap: 2 }}>
           <Box>
