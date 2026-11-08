@@ -45,6 +45,10 @@ EXPOSE 3000
 CMD ["node", "apps/web/server.js"]
 
 FROM dependencies AS worker
+# Cliente do Docker (só o binário, sem daemon): os backups do tipo "Volume Docker" rodam `docker run` no Docker do
+# host, pelo /var/run/docker.sock montado no serviço. Sem ele: "spawn docker ENOENT".
+ADD https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz /tmp/docker.tgz
+RUN tar -xzf /tmp/docker.tgz -C /usr/local/bin --strip-components=1 docker/docker && rm /tmp/docker.tgz && docker --version
 COPY . .
 ENV NODE_ENV=production
 RUN npx prisma generate --schema=packages/database/prisma/schema.prisma
