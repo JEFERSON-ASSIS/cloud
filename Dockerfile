@@ -2,8 +2,16 @@
 FROM node:24-bookworm-slim AS base
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+# Cliente PostgreSQL 17 (repositório oficial do PostgreSQL): o pg_dump faz backup de servidores da mesma versão ou
+# mais antigos; o pacote padrão do Debian 12 é o 15 e recusa servidores 16/17 ("server version mismatch").
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssl ca-certificates default-mysql-client postgresql-client gzip tar coreutils \
+    && apt-get install -y --no-install-recommends openssl ca-certificates curl default-mysql-client gzip tar coreutils \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-17 \
+    && apt-get purge -y curl && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
 FROM base AS dependencies
