@@ -729,6 +729,9 @@ const backupWorker = new Worker(
 
       // Enviar notificação de Sucesso
       try {
+        const schedule = run.scheduleId
+          ? await prisma.backupSchedule.findUnique({ where: { id: run.scheduleId }, select: { name: true, retentionDaily: true, retentionWeekly: true, retentionMonthly: true } })
+          : null;
         await sendBackupNotification({
           organizationId,
           event: "SUCCESS",
@@ -736,6 +739,16 @@ const backupWorker = new Worker(
           runId,
           durationMs,
           fileSize,
+          details: {
+            sourceType: source.type,
+            fileName: filename,
+            checksumSha256,
+            storage: "Google Drive",
+            startedAt: run.startedAt?.toISOString() ?? null,
+            completedAt: new Date().toISOString(),
+            scheduleName: schedule?.name ?? null,
+            retention: schedule ? { daily: schedule.retentionDaily, weekly: schedule.retentionWeekly, monthly: schedule.retentionMonthly } : null,
+          },
         });
       } catch (errNotif) {
         await log("WARNING", `Erro ao despachar notificação de sucesso: ${errNotif instanceof Error ? errNotif.message : "Erro interno"}`);
@@ -764,6 +777,7 @@ const backupWorker = new Worker(
           sourceName: source.name,
           runId,
           errorMessage: errMsg,
+          details: { sourceType: source.type, startedAt: run.startedAt?.toISOString() ?? null, completedAt: new Date().toISOString() },
         });
       } catch (errNotif) {
         await log("WARNING", `Erro ao despachar notificação de falha: ${errNotif instanceof Error ? errNotif.message : "Erro interno"}`);

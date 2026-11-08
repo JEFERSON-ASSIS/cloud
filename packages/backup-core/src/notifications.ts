@@ -9,10 +9,12 @@ export interface NotificationPayload {
   durationMs?: number;
   fileSize?: number;
   errorMessage?: string;
+  /** detalhes da execução, enviados só no webhook genérico (arquivo, conferência, agendamento e retenção) */
+  details?: Record<string, unknown>;
 }
 
 export async function sendBackupNotification(payload: NotificationPayload): Promise<{ sentCount: number; errors: string[] }> {
-  const { organizationId, event, sourceName, runId, durationMs, fileSize, errorMessage } = payload;
+  const { organizationId, event, sourceName, runId, durationMs, fileSize, errorMessage, details } = payload;
   
   const settings = await prisma.notificationSetting.findMany({
     where: {
@@ -96,6 +98,7 @@ export async function sendBackupNotification(payload: NotificationPayload): Prom
             durationMs,
             fileSize,
             errorMessage,
+            details,
             timestamp: new Date().toISOString(),
           };
         }
